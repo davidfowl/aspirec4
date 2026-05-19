@@ -1,14 +1,13 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 // Add LikeC4 visualization to the application. This will allow us to visualize the components and their relationships in a C4 model.
-builder
-	.AddAspireC4(configure: static opts =>
-		// Validate the C4 model before starting the application to catch any issues early.
-		opts.WithValidateBeforeStart()
-			.WithTitle("AspireC4 Test App")
-			.WithViewTitle("AspireC4 Architecture")
-			.WithViewDescription(
-				@"
+var c4 = builder.AddAspireC4(configure: static opts =>
+	// Validate the C4 model before starting the application to catch any issues early.
+	opts.WithValidateBeforeStart()
+		.WithTitle("AspireC4 Test App")
+		.WithViewTitle("AspireC4 Architecture")
+		.WithViewDescription(
+			@"
 This **LikeC4** view was automatically generated from the **Aspire** resource graph, using the **AspireC4** hosting extension.
 
 For more details on all of these tools and components, see:
@@ -17,10 +16,17 @@ For more details on all of these tools and components, see:
 - [LikeC4](https://likec4.dev/)
 - [AspireC4](https://kjl.dev/projects/aspirec4/)
 "
-			)
-	)
-	// This is to configure certain parts of the AppHost and AspireC4 purely for this example test app.
-	.ConfigureTestHost();
+		)
+);
+
+// Allow Dockerfile-based test environments (e.g. Dockerfile.e2e-npm) to switch the LikeC4
+// server to a local JavaScript package manager CLI instead of the Docker container.
+var cliRuntimeStr = Environment.GetEnvironmentVariable("ASPIREC4_CLI_RUNTIME");
+if (cliRuntimeStr is not null && Enum.TryParse<LocalCLIRuntime>(cliRuntimeStr, ignoreCase: true, out var cliRuntime))
+	c4.WithLocalCLI(cliRuntime);
+
+// This is to configure certain parts of the AppHost and AspireC4 purely for this example test app.
+c4.ConfigureTestHost();
 
 // Azure managed resources (containers when local).
 var azureManagerRedis = builder

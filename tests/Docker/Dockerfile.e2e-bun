@@ -1,0 +1,76 @@
+# Test runner environment for bun-based local CLI integration tests.
+#
+# Runs Docker-in-Docker (DinD) so that redis/postgres containers used by the
+# TestAppHost start correctly. The LikeC4 server itself is driven by bunx instead
+# of a Docker container, exercising the WithLocalCLI(LocalCLIRuntime.Bun) path.
+# ASPIREC4_CLI_RUNTIME=Bun causes the TestAppHost to call .WithLocalCLI(Bun) at startup.
+#
+# Node.js is still installed because the TestAppHost uses AddNodeApp/.WithNpm(install:true)
+# which requires npm for the sample node app's dependency installation.
+#
+# Usage (from repo root):
+#   docker build -f tests/Docker/Dockerfile.e2e-bun -t aspirec4-e2e-bun .
+#   docker run --rm --privileged \
+#     -v $(pwd):/workspace \
+#     -w /workspace \
+#     aspirec4-e2e-bun \
+#     dotnet test src/tests/AspireC4.IntegrationTests
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        docker.io \
+        ca-certificates \
+        curl \
+        unzip && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    # Install bun via the official installer script.
+    curl -fsSL https://bun.sh/install | bash && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+
+# Entrypoint: start dockerd (DinD) for redis/postgres containers, wait for readiness,
+# pre-install the likec4 package via bunx so it is cached before the test runs,
+# then exec the test command.
+RUN cat > /entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
+
+dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
+DOCKERD_PID=$!
+
+echo "Waiting for Docker daemon..."
+for i in $(seq 1 60); do
+    docker info >/dev/null 2>&1 && { echo "Docker daemon ready"; break; }
+    sleep 1
+done
+
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker daemon not ready after 60s" >&2
+    cat /var/log/dockerd.log >&2
+    exit 1
+fi
+
+# Pre-install the likec4 package so it is cached before Aspire starts the local
+# CLI server via bunx.
+echo "Pre-installing likec4 via bunx..."
+/root/.bun/bin/bunx likec4 --version || echo "WARNING: bunx likec4 pre-install failed (non-fatal)"
+
+exec "$@"
+EOF
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+ENV ASPIREC4_CLI_RUNTIME=Bun
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_GENERATE_ASPNET_CERTIFICATE=false
+ENV TERM=xterm
+
+ENTRYPOINT ["/entrypoint.sh"]

@@ -69,7 +69,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runtime: [docker, podman]
+        include:
+          - runtime: docker
+          - runtime: podman
+          - runtime: npm
+            cli_runtime: Npx
+          - runtime: pnpm
+            cli_runtime: Pnpm
+          - runtime: yarn
+            cli_runtime: Yarn
+          - runtime: bun
+            cli_runtime: Bun
+          - runtime: deno
+            cli_runtime: Deno
 
     env:
       CONFIGURATION: Release
@@ -90,6 +102,24 @@ jobs:
           node-version-file: package.json
           cache: npm
 
+      - name: Set up pnpm
+        if: matrix.runtime == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Set up Bun
+        if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Deno
+        if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@v2
+
+      - name: Enable Yarn Berry (dlx support)
+        if: matrix.runtime == 'yarn'
+        run: corepack enable && corepack prepare yarn@stable --activate
+
       - name: Restore dependencies
         run: dotnet restore ${{ env.SOLUTION }}
 
@@ -107,6 +137,10 @@ jobs:
           done
           echo "DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock" >> $GITHUB_ENV
           echo "ASPIRE_CONTAINER_RUNTIME=podman" >> $GITHUB_ENV
+
+      - name: Set local CLI runtime
+        if: matrix.cli_runtime != ''
+        run: echo "ASPIREC4_CLI_RUNTIME=${{ matrix.cli_runtime }}" >> $GITHUB_ENV
 
       - name: Run integration tests
         run: |
