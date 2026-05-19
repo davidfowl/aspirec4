@@ -135,6 +135,15 @@ public sealed class AspireC4DiagramOptions
 	public int ExternalProcessTimeoutSeconds { get; set; } = 30;
 
 	/// <summary>
+	/// Utilises GraphViz' `dot` executable for LikeC4's automatic icon inference when available on the system PATH.
+	/// This can improve the accuracy of inferred icons for certain technologies (e.g. databases) and allows inference
+	/// of additional icons based on container/ component relationships (e.g. inferring a database
+	/// icon for a container that contains a component with a database relationship).
+	/// Defaults to <see langword="true"/>. Set to <see langword="false"/> to disable and rely solely on LikeC4's built-in heuristics.
+	/// </summary>
+	public bool UseDotIfAvailable { get; set; } = true;
+
+	/// <summary>
 	/// Custom element kind specifications emitted in the <c>specification { }</c> block.
 	/// Each entry may include optional style tokens (shape, color, icon, border, opacity),
 	/// a notation string, and a default technology label.
@@ -307,18 +316,4 @@ public sealed class AspireC4DiagramOptions
 	/// </summary>
 	[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2227:Collection properties should be read only")]
 	public Dictionary<string, string> ConfigFileMetadata { get; set; } = [];
-
-	/// <summary>
-	/// Configures strict-mode validation for the diagram model.
-	/// When <see cref="AspireC4StrictOptions.Mode"/> is set to anything other than
-	/// <see cref="AspireC4StrictMode.None"/>, any tag, relationship kind, group, or metadata key
-	/// used in the model that is not declared in the corresponding allowed list causes an
-	/// <see cref="InvalidOperationException"/> to be thrown during model building.
-	/// <para>
-	/// Configure via the <c>WithAllowed*</c> extension methods or bind from the
-	/// <c>AspireC4:Strict</c> configuration section.
-	/// </para>
-	/// </summary>
-	[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2227:Collection properties should be read only")]
-	public AspireC4StrictOptions Strict { get; set; } = new();
 }

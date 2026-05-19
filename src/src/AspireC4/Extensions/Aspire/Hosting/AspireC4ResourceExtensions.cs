@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using Aspire.Hosting.AspireC4.ApplicationModel;
-using Aspire.Hosting.AspireC4.LikeC4.Annotations;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -66,7 +65,16 @@ public static class AspireC4ResourceExtensions
 				targetPort: LikeC4LocalServerResource.DefaultPort
 			)
 			.WithExternalHttpEndpoints()
-			.WithAnnotation(new ExcludeFromLikeC4Annotation(), ResourceAnnotationMutationBehavior.Replace);
+			.ExcludeFromLikeC4()
+			.ExcludeFromManifest()
+			.WithInitialState(
+				new CustomResourceSnapshot
+				{
+					ResourceType = nameof(LikeC4LocalServerResource),
+					IsHidden = true,
+					Properties = [],
+				}
+			);
 
 		aspirec4.InnerResource = localResource;
 

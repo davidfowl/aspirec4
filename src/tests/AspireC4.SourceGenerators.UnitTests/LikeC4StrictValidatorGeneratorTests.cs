@@ -216,7 +216,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("model.c4", dsl)],
-			strictMode: true,
+			strictMode: "warning",
 			cancellationToken: cancellationToken
 		);
 
@@ -241,7 +241,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("model.c4", dsl)],
-			strictMode: true,
+			strictMode: "error",
 			cancellationToken: cancellationToken
 		);
 
@@ -264,7 +264,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("model.c4", dsl)],
-			strictMode: false,
+			strictMode: "off",
 			cancellationToken: cancellationToken
 		);
 
@@ -279,7 +279,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var source = BuildSourceWithCallSites(".WithTag(\"any-value\")");
 
 		// Act
-		var result = RunGenerator(source, additionalFiles: [], strictMode: true, cancellationToken: cancellationToken);
+		var result = RunGenerator(source, additionalFiles: [], strictMode: "all", cancellationToken: cancellationToken);
 
 		// Assert — no DSL definitions = nothing to validate against
 		await Assert.That(GetDiagnostics(result, "ASPIREC4001")).IsEmpty();
@@ -296,7 +296,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("spec.c4", dsl)],
-			strictMode: true,
+			strictMode: "all",
 			cancellationToken: cancellationToken
 		);
 
@@ -321,7 +321,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("spec.c4", dsl)],
-			strictMode: true,
+			strictMode: "all",
 			cancellationToken: cancellationToken
 		);
 
@@ -348,7 +348,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("spec.c4", dsl)],
-			strictMode: true,
+			strictMode: "all",
 			cancellationToken: cancellationToken
 		);
 
@@ -379,7 +379,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var result = RunGenerator(
 			source,
 			additionalFiles: [new TestAdditionalText("spec.c4", dsl)],
-			strictMode: true,
+			strictMode: "all",
 			cancellationToken: cancellationToken
 		);
 
@@ -805,7 +805,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 			[LikeC4Registry]
 			static class MyRegistry
 			{
-			    [KnownType(LikeC4RegistryType.Tag, Strict = LikeC4StrictMode.Disable)]
+			    [KnownType(LikeC4RegistryType.Tag, Strict = LikeC4Severity.Off)]
 			    public const string External = "external";
 			}
 
@@ -836,7 +836,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 			using Aspire.Hosting.AspireC4;
 			namespace TestApp;
 
-			[LikeC4Registry(Strict = LikeC4StrictMode.Enable)]
+			[LikeC4Registry(Strict = LikeC4Severity.Error)]
 			static class MyRegistry
 			{
 			    public static class Groups { public const string Frontend = "Frontend"; }
@@ -926,108 +926,293 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 	}
 
 	// -----------------------------------------------------------------------
-	// Module initializer generation (LikeC4RegistryStrictConfiguration.g.cs)
+	// Diagnostic severity escalation — warning vs error based on strict mode
 	// -----------------------------------------------------------------------
 
 	[Test]
-	public async Task RunGenerator_WithRegistryClass_GeneratesModuleInitializerFile(CancellationToken cancellationToken)
+	public async Task RunGenerator_WithRegistryClassAndNoStrictMode_EmitsSuggestionSeverity(
+		CancellationToken cancellationToken
+	)
 	{
-		// Arrange
+		// Arrange — no explicit strict mode; class-based validation uses suggestion severity by default
 		var source = BuildSourceWithDefinitionsClass(
-			tagsConstants: [("LocalDev", "local-dev")],
-			relationshipKindConstants: [("Resp", "RESP")],
-			groupConstants: [("DevGroup", "Dev Group")],
-			metadataKeyConstants: [("AzureSku", "Azure_SKU")]
+			tagsConstants: [("External", "external")],
+			callSites: [".WithTag(\"unknown\")"]
 		);
 
 		// Act
 		var result = RunGenerator(source, cancellationToken: cancellationToken);
 
-		// Assert — initializer file is generated
-		var generated = GetGeneratedSource(result, "LikeC4RegistryStrictConfiguration.g.cs");
-		await Assert.That(generated).IsNotNull();
-		await Assert.That(generated).Contains("[ModuleInitializer]");
-		await Assert.That(generated).Contains("LikeC4RegistryBridge.Register");
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4001");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Info);
 	}
 
 	[Test]
-	public async Task RunGenerator_WithRegistryClass_GeneratedInitializerContainsAllRegistryValues(
+	public async Task RunGenerator_WithDslWarningModeAndUndeclaredTag_EmitsWarningSeverity(
 		CancellationToken cancellationToken
 	)
 	{
-		// Arrange
-		var source = BuildSourceWithDefinitionsClass(
-			tagsConstants: [("LocalDev", "local-dev")],
-			relationshipKindConstants: [("Resp", "RESP"), ("TcpIp", "tcp-ip")],
-			groupConstants: [("DevGroup", "Dev Group")],
-			metadataKeyConstants: [("AzureSku", "Azure_SKU"), ("UseCase", "Use_Case")]
+		// Arrange — AspireC4Strict=warning emits warnings for DSL validation
+		const string dsl = """
+			specification {
+			  tag existing-tag
+			}
+			""";
+		var source = BuildSourceWithCallSites(".WithTag(\"unknown-tag\")");
+
+		// Act
+		var result = RunGenerator(
+			source,
+			additionalFiles: [new TestAdditionalText("model.c4", dsl)],
+			strictMode: "warning",
+			cancellationToken: cancellationToken
 		);
 
-		// Act
-		var result = RunGenerator(source, cancellationToken: cancellationToken);
-		var generated = GetGeneratedSource(result, "LikeC4RegistryStrictConfiguration.g.cs");
-
-		// Assert — each declared value appears in the generated output
-		await Assert.That(generated).IsNotNull();
-		await Assert.That(generated).Contains("opts.Tags.Add(\"local-dev\")");
-		await Assert.That(generated).Contains("opts.RelationshipKinds.Add(\"RESP\")");
-		await Assert.That(generated).Contains("opts.RelationshipKinds.Add(\"tcp-ip\")");
-		await Assert.That(generated).Contains("opts.Groups.Add(\"Dev Group\")");
-		await Assert.That(generated).Contains("opts.MetadataKeys.Add(\"Azure_SKU\")");
-		await Assert.That(generated).Contains("opts.MetadataKeys.Add(\"Use_Case\")");
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4001");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Warning);
 	}
 
 	[Test]
-	public async Task RunGenerator_WithDisabledPropertyTrue_DoesNotGenerateModuleInitializerFile(
+	public async Task RunGenerator_WithDslErrorModeAndUndeclaredTag_EmitsErrorSeverity(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — AspireC4Strict=error escalates to Error
+		const string dsl = """
+			specification {
+			  tag existing-tag
+			}
+			""";
+		var source = BuildSourceWithCallSites(".WithTag(\"unknown-tag\")");
+
+		// Act
+		var result = RunGenerator(
+			source,
+			additionalFiles: [new TestAdditionalText("model.c4", dsl)],
+			strictMode: "error",
+			cancellationToken: cancellationToken
+		);
+
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4001");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+	}
+
+	[Test]
+	public async Task RunGenerator_WithDslWarningModeAndUndeclaredKind_EmitsWarningSeverity(
 		CancellationToken cancellationToken
 	)
 	{
 		// Arrange
-		var source = BuildSourceWithDefinitionsClass(tagsConstants: [("LocalDev", "local-dev")]);
+		const string dsl = """
+			specification {
+			  element container
+			}
+			""";
+		var source = BuildSourceWithCallSites(".WithKind(\"unknown-kind\")");
 
 		// Act
-		var result = RunGenerator(source, disabled: true, cancellationToken: cancellationToken);
+		var result = RunGenerator(
+			source,
+			additionalFiles: [new TestAdditionalText("spec.c4", dsl)],
+			strictMode: "warning",
+			cancellationToken: cancellationToken
+		);
 
-		// Assert — generator disabled means no module initializer is emitted
-		var generated = GetGeneratedSource(result, "LikeC4RegistryStrictConfiguration.g.cs");
-		await Assert.That(generated).IsNull();
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4002");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Warning);
 	}
 
 	[Test]
-	public async Task RunGenerator_WithNoRegistryClass_DoesNotGenerateModuleInitializerFile(
+	public async Task RunGenerator_WithRegistryStrictEnableAndUndeclaredTag_EmitsErrorSeverity(
 		CancellationToken cancellationToken
 	)
 	{
-		// Arrange — source has call sites but no [LikeC4Registry] class
-		var source = BuildSourceWithCallSites(".WithTag(\"some-tag\")");
+		// Arrange — [LikeC4Registry(Strict = Enable)] escalates all undeclared-tag diagnostics to Error
+		const string source = """
+			using Aspire.Hosting.AspireC4;
+			namespace TestApp;
+
+			[LikeC4Registry(Strict = LikeC4Severity.Error)]
+			static class MyRegistry
+			{
+			    public static class Tags { public const string External = "external"; }
+			}
+
+			class Setup
+			{
+			    static void Configure()
+			    {
+			        var a = new object();
+			        a.WithTag("undeclared");
+			    }
+			}
+			""";
 
 		// Act
 		var result = RunGenerator(source, cancellationToken: cancellationToken);
 
-		// Assert — no registry class → no module initializer
-		var generated = GetGeneratedSource(result, "LikeC4RegistryStrictConfiguration.g.cs");
-		await Assert.That(generated).IsNull();
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4001");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
 	}
 
 	[Test]
-	public async Task RunGenerator_WithRegistryClassWithSpecialCharacters_EscapesValuesCorrectly(
+	public async Task RunGenerator_WithRegistryStrictEnableAndUndeclaredKind_EmitsErrorSeverity(
 		CancellationToken cancellationToken
 	)
 	{
-		// Arrange — group name contains a quote and backslash
-		var source = BuildSourceWithDefinitionsClass(groupConstants: [("SlashGroup", "Dev/ Sync Group")]);
+		// Arrange
+		const string source = """
+			using Aspire.Hosting.AspireC4;
+			namespace TestApp;
+
+			[LikeC4Registry(Strict = LikeC4Severity.Error)]
+			static class MyRegistry
+			{
+			    public static class ElementKinds { public const string Container = "container"; }
+			}
+
+			class Setup
+			{
+			    static void Configure()
+			    {
+			        var a = new object();
+			        a.WithKind("undeclared-kind");
+			    }
+			}
+			""";
 
 		// Act
 		var result = RunGenerator(source, cancellationToken: cancellationToken);
-		var generated = GetGeneratedSource(result, "LikeC4RegistryStrictConfiguration.g.cs");
 
-		// Assert — the slash is preserved as-is (only quotes and backslashes are escaped)
-		await Assert.That(generated).IsNotNull();
-		await Assert.That(generated).Contains("opts.Groups.Add(\"Dev/ Sync Group\")");
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4002");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
 	}
 
-	// -----------------------------------------------------------------------
-	// Helpers
+	[Test]
+	public async Task RunGenerator_WithRegistryStrictEnableAndUndeclaredGroup_EmitsErrorSeverity(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange
+		const string source = """
+			using Aspire.Hosting.AspireC4;
+			namespace TestApp;
+
+			[LikeC4Registry(Strict = LikeC4Severity.Error)]
+			static class MyRegistry
+			{
+			    public static class Groups { public const string Frontend = "Frontend"; }
+			}
+
+			class Setup
+			{
+			    static void Configure()
+			    {
+			        var a = new object();
+			        a.WithLikeC4Group("Backend");
+			    }
+			}
+			""";
+
+		// Act
+		var result = RunGenerator(source, cancellationToken: cancellationToken);
+
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4004");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+	}
+
+	[Test]
+	public async Task RunGenerator_WithKnownTypeStrictEnableAndUndeclaredTag_EmitsErrorSeverity(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — [KnownType(Tag, Strict = Enable)] escalates only the tag type to Error
+		const string source = """
+			using Aspire.Hosting.AspireC4;
+			namespace TestApp;
+
+			[LikeC4Registry]
+			static class MyRegistry
+			{
+			    [KnownType(LikeC4RegistryType.Tag, Strict = LikeC4Severity.Error)]
+			    public const string External = "external";
+			}
+
+			class Setup
+			{
+			    static void Configure()
+			    {
+			        var a = new object();
+			        a.WithTag("undeclared");
+			    }
+			}
+			""";
+
+		// Act
+		var result = RunGenerator(source, cancellationToken: cancellationToken);
+
+		// Assert
+		var diagnostics = GetDiagnostics(result, "ASPIREC4001");
+		await Assert.That(diagnostics.Count).IsGreaterThan(0);
+		await Assert.That(diagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+	}
+
+	[Test]
+	public async Task RunGenerator_WithKnownTypeStrictEnableOnTagsOnly_OtherTypesRemainsSuggestionSeverity(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — only Tags has Strict=Enable; Kind diagnostics should remain Suggestion
+		const string source = """
+			using Aspire.Hosting.AspireC4;
+			namespace TestApp;
+
+			[LikeC4Registry]
+			static class MyRegistry
+			{
+			    [KnownType(LikeC4RegistryType.Tag, Strict = LikeC4Severity.Error)]
+			    public const string External = "external";
+
+			    public static class ElementKinds { public const string Container = "container"; }
+			}
+
+			class Setup
+			{
+			    static void Configure()
+			    {
+			        var a = new object();
+			        a.WithTag("undeclared-tag");
+			        a.WithKind("undeclared-kind");
+			    }
+			}
+			""";
+
+		// Act
+		var result = RunGenerator(source, cancellationToken: cancellationToken);
+
+		// Assert — tags are errors, kinds remain suggestions
+		var tagDiagnostics = GetDiagnostics(result, "ASPIREC4001");
+		var kindDiagnostics = GetDiagnostics(result, "ASPIREC4002");
+		await Assert.That(tagDiagnostics.Count).IsGreaterThan(0);
+		await Assert.That(tagDiagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Error);
+		await Assert.That(kindDiagnostics.Count).IsGreaterThan(0);
+		await Assert.That(kindDiagnostics[0].Severity).IsEqualTo(DiagnosticSeverity.Info);
+	}
+
 	// -----------------------------------------------------------------------
 
 	static LikeC4StrictValidatorGenerator CreateSut() => new();
@@ -1035,7 +1220,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 	static GeneratorDriverRunResult RunGenerator(
 		string source,
 		TestAdditionalText[]? additionalFiles = null,
-		bool strictMode = false,
+		string? strictMode = null,
 		bool disabled = false,
 		CancellationToken cancellationToken = default
 	)
@@ -1051,8 +1236,8 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		var additionalTexts = additionalFiles?.Cast<AdditionalText>().ToArray() ?? [];
 
 		var buildProperties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-		if (strictMode)
-			buildProperties["build_property.AspireC4Strict"] = "true";
+		if (strictMode is not null)
+			buildProperties["build_property.AspireC4Strict"] = strictMode;
 		if (disabled)
 			buildProperties["build_property.DisableAspireC4SourceGenerator"] = "true";
 
