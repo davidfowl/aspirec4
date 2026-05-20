@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using Aspire.Hosting.AspireC4.ApplicationModel;
-using Aspire.Hosting.AspireC4.LikeC4.Annotations;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -52,10 +51,16 @@ public static class AspireC4ResourceExtensions
 			LikeC4LocalServerResource.DefaultPort
 		);
 
+		// Use the system temp directory as the working directory for the serve process.
+		// The output directory is passed as an absolute path argument, so the working
+		// directory only affects how pnpm/yarn/deno resolve workspace roots. Using /tmp
+		// (or the system temp dir on Windows) prevents package managers from walking up
+		// and detecting the AppHost's parent package.json as a workspace root, which would
+		// cause them to bypass the pre-warmed dlx cache and re-download on every start.
 		LikeC4LocalServerResource localResource = new(
 			aspirec4.Name + AspireC4DistributedApplicationBuilderExtensions.AspireC4ServerResourceSuffix,
 			command,
-			aspirec4.OutputDirectory
+			Path.GetTempPath()
 		);
 
 		var localBuilder = builder
@@ -66,7 +71,16 @@ public static class AspireC4ResourceExtensions
 				targetPort: LikeC4LocalServerResource.DefaultPort
 			)
 			.WithExternalHttpEndpoints()
-			.WithAnnotation(new ExcludeFromLikeC4Annotation(), ResourceAnnotationMutationBehavior.Replace);
+			.ExcludeFromLikeC4()
+			.ExcludeFromManifest()
+			.WithInitialState(
+				new CustomResourceSnapshot
+				{
+					ResourceType = nameof(LikeC4LocalServerResource),
+					IsHidden = true,
+					Properties = [],
+				}
+			);
 
 		aspirec4.InnerResource = localResource;
 

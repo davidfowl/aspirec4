@@ -92,8 +92,22 @@ sealed partial class AspireC4LifecycleHook(
 
 				await WriteC4FileAsync(evt.Model, ct);
 
+				// Always keep the inner server resource hidden — AspireC4Resource is the single
+				// dashboard entry. Its state, URLs, and properties are forwarded from the inner.
+				if (aspirec4Resource?.InnerResource is not null)
+				{
+					_ = KeepServerHiddenAsync(aspirec4Resource.InnerResource, ct);
+				}
+
 				if (options.Value.HideFromDashboard)
 				{
+					// When HideFromDashboard is set, also suppress the outer resource and
+					// surface the diagram URL on all project resources instead.
+					if (aspirec4Resource is not null)
+					{
+						_ = KeepServerHiddenAsync(aspirec4Resource, ct);
+					}
+
 					SetupDashboardIntegration(evt.Model, options.Value.DashboardLinkDisplayName, ct);
 				}
 
@@ -101,8 +115,9 @@ sealed partial class AspireC4LifecycleHook(
 				// The ct is the application lifetime token; it is cancelled on shutdown.
 				_ = WatchResourceStatesAsync(evt.Model, ct);
 
-				// Forward inner resource state to AspireC4Resource so consumers watching
-				// by the outer resource name (e.g., integration tests) receive state updates.
+				// Forward inner resource state, URLs, and properties to AspireC4Resource so
+				// it is the single useful dashboard entry and consumers watching by the outer
+				// resource name (e.g., integration tests) receive correct state updates.
 				if (aspirec4Resource is not null)
 				{
 					_ = ForwardInnerResourceStateAsync(aspirec4Resource, ct);

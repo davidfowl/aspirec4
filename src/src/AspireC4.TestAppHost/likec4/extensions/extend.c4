@@ -1,7 +1,44 @@
-// This file extends the auto-generated model with additional documentation, links, and metadata.
-// It is intentionally hand-authored; do not overwrite.
+// This file extends the auto-generated model with additional models, documentation, links, and metadata.
+// It is intentionally hand-authored.
+
+specification {
+	color custom-team-color #FF5733
+	color custom-system-color #33C1FF
+
+	element team {
+    style {
+      shape person
+      color custom-team-color
+    }
+  }
+
+  element system {
+    style {
+      shape browser 
+      color custom-system-color
+      icon @/likec4/likec4-wordmark.svg
+    }
+  }
+}
 
 model {
+  likec4_team = team 'LikeC4 Contributors' {
+    summary 'The team of contributors who created the LikeC4 model and documentation.'
+    link https://github.com/likec4/likec4/graphs/contributors 'GitHub Contributors'
+
+     -> likec4 'Created with 🩷 by'
+  }
+
+  likec4 = system 'LikeC4' {
+    summary 'Describe your system architecture with code. Visualize, validate and share — all from a single source of truth.'
+    link https://likec4.dev/ 'Learn more about LikeC4'
+    link https://github.com/likec4/likec4/ 'LikeC4 on GitHub'
+    link https://github.com/sponsors/likec4 'Sponsor LikeC4 🩷'
+    link https://github.com/davydkov 'Connect with the author on GitHub'
+
+    -> aspirec4_server 'used by 🤖'
+  }
+
   extend azure_redis {
     link https://aka.ms/azure-cache-for-redis 'Azure Cache for Redis Docs'
     metadata {
