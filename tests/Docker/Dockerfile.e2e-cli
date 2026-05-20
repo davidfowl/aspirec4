@@ -1,0 +1,125 @@
+# Shared test runner for all local JavaScript CLI integration tests.
+#
+# Contains a common base stage (Docker-in-Docker, .NET SDK, Node.js, shared entrypoint)
+# and one named stage per supported runtime. Build with --target to select a runtime:
+#
+#   docker build --target npm  -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-npm  .
+#   docker build --target pnpm -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-pnpm .
+#   docker build --target yarn -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-yarn .
+#   docker build --target bun  -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-bun  .
+#   docker build --target deno -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-deno .
+#
+#   docker run --rm --privileged \
+#     -v $(pwd):/workspace:ro \
+#     -v aspirec4-testbin:/workspace/src/tests/AspireC4.IntegrationTests/bin \
+#     -v aspirec4-testobj:/workspace/src/tests/AspireC4.IntegrationTests/obj \
+#     -v aspirec4-testhost-bin:/workspace/src/src/AspireC4.TestAppHost/bin \
+#     -v aspirec4-testhost-obj:/workspace/src/src/AspireC4.TestAppHost/obj \
+#     -v aspirec4-nodeapp-modules:/workspace/samples/node-app/node_modules \
+#     -v aspirec4-nuget-cache:/root/.nuget/packages \
+#     aspirec4-e2e-npm \
+#     dotnet test src/tests/AspireC4.IntegrationTests --no-build
+#
+# ASPIREC4_CLI_RUNTIME is set per-stage and read by TestAppHost/Program.cs to call
+# .WithLocalCLI(runtime), routing the LikeC4 server through the local CLI instead
+# of the ghcr.io/likec4/likec4 Docker container.
+#
+# Isolation: all package manager pre-install operations run from /tmp so that lock
+# files (pnpm-lock.yaml, yarn.lock, bun.lockb, etc.) are never written into the
+# bind-mounted workspace.
+
+# ── Base ──────────────────────────────────────────────────────────────────────
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS base
+
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        docker.io \
+        ca-certificates \
+        curl \
+        unzip && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Shared DinD entrypoint. Starts dockerd (needed for redis/postgres containers
+# in the TestAppHost), waits for readiness, then pre-installs the likec4 package
+# via the runtime selected by ASPIREC4_CLI_RUNTIME — always from /tmp so that no
+# lock files are written into the bind-mounted workspace.
+RUN cat > /entrypoint.sh <<'EOF'
+#!/bin/bash
+set -e
+
+dockerd --host=unix:///var/run/docker.sock --storage-driver=vfs >/var/log/dockerd.log 2>&1 &
+
+echo "Waiting for Docker daemon..."
+for i in $(seq 1 60); do
+    docker info >/dev/null 2>&1 && { echo "Docker daemon ready"; break; }
+    sleep 1
+done
+
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker daemon not ready after 60s" >&2
+    cat /var/log/dockerd.log >&2
+    exit 1
+fi
+
+# Pre-install likec4 from /tmp to avoid writing lock files into /workspace.
+echo "Pre-installing likec4 (runtime: ${ASPIREC4_CLI_RUNTIME})..."
+cd /tmp
+case "${ASPIREC4_CLI_RUNTIME}" in
+    Npx)  npx --yes likec4 --version ;;
+    Pnpm) pnpm --ignore-workspace dlx likec4 --version ;;
+    Yarn) yarn dlx likec4 --version ;;
+    Bun)  bunx likec4 --version ;;
+    Deno) ;;  # Deno caches modules on first use; no pre-install needed
+    *)    echo "Unknown ASPIREC4_CLI_RUNTIME: ${ASPIREC4_CLI_RUNTIME}" ;;
+esac || echo "WARNING: likec4 pre-install failed (non-fatal, will retry at serve time)"
+cd /workspace
+
+exec "$@"
+EOF
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+WORKDIR /workspace
+
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+ENV DOTNET_GENERATE_ASPNET_CERTIFICATE=false
+ENV TERM=xterm
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# ── npm / npx ─────────────────────────────────────────────────────────────────
+
+FROM base AS npm
+# npx ships with Node.js — no additional install required.
+ENV ASPIREC4_CLI_RUNTIME=Npx
+
+# ── pnpm ──────────────────────────────────────────────────────────────────────
+
+FROM base AS pnpm
+RUN npm install -g pnpm
+ENV ASPIREC4_CLI_RUNTIME=Pnpm
+
+# ── yarn (Berry / v2+, required for `yarn dlx`) ───────────────────────────────
+
+FROM base AS yarn
+RUN corepack enable && corepack prepare yarn@stable --activate
+ENV ASPIREC4_CLI_RUNTIME=Yarn
+
+# ── bun ───────────────────────────────────────────────────────────────────────
+
+FROM base AS bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+ENV ASPIREC4_CLI_RUNTIME=Bun
+
+# ── deno ──────────────────────────────────────────────────────────────────────
+
+FROM base AS deno
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV DENO_INSTALL="/root/.deno"
+ENV PATH="$DENO_INSTALL/bin:$PATH"
+ENV ASPIREC4_CLI_RUNTIME=Deno
