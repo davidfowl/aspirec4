@@ -16,6 +16,9 @@ default:
 # Open the solution in the default IDE (e.g., Visual Studio or VS Code)
 vs:
     open {{ _solution }}
+# Run all tests (unit + integration + e2e )
+test-all: test test-integration test-e2e test-e2e-cli
+
 # Restore NuGet packages and local tools
 [group('dotnet')]
 restore:

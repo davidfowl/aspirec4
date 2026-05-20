@@ -105,9 +105,11 @@ var localPostgres = builder
 		opts.WithDescription("For testing Azure Postgres vs. local Postgres")
 			.WithSummary("Local Postgres for development")
 			.WithLink("https://www.postgresql.org/", "Learn more about Postgres")
-			.WithTag("local-dev-1")
+			// Naming this something else will create a diagnostic 'suggestion' as it's not in the AppLikeC4Registry
+			// ... you can always use AppLikeC4Registry.Tags.LocalDev to prevent typos.
+			.WithTag("local-dev")
 	)
-	.WithLikeC4Group("Local Dev/ Sync Group 1");
+	.WithLikeC4Group("Local Dev/ Sync Group");
 
 // Our app...
 var nodeApp = builder
@@ -115,9 +117,7 @@ var nodeApp = builder
 	// Add LikeC4 details to the component for better visualization in the C4 model.
 	.WithLikeC4Details(
 		label: "Sample Node App",
-		//technology: "Node.js",
 		description: "A sample Node.js application that connects to Azure Redis and Azure Postgres"
-	//icon: "tech:nodejs"
 	)
 	.WithNpm(install: true)
 	.WithHttpEndpoint(env: "PORT")
