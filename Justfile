@@ -93,17 +93,6 @@ _e2e_dockerfile_podman := "tests/Docker/Dockerfile.e2e-podman"
 [private]
 _e2e_dockerfile_cli := "tests/Docker/Dockerfile.e2e-cli"
 
-# Named volumes used to keep build artefacts and package-manager caches inside
-# Docker instead of writing them back to the bind-mounted workspace on the host.
-[private]
-_e2e_cli_run_flags := "\
-    -v aspirec4-nuget-cache:/root/.nuget/packages \
-    -v aspirec4-testbin:/workspace/src/tests/AspireC4.IntegrationTests/bin \
-    -v aspirec4-testobj:/workspace/src/tests/AspireC4.IntegrationTests/obj \
-    -v aspirec4-testhost-bin:/workspace/src/src/AspireC4.TestAppHost/bin \
-    -v aspirec4-testhost-obj:/workspace/src/src/AspireC4.TestAppHost/obj \
-    -v aspirec4-nodeapp-modules:/workspace/samples/node-app/node_modules"
-
 # Run integration tests against the host Docker runtime (Docker Desktop or Rancher Desktop).
 # Runs natively on the host so bind-mount paths are real host paths that Docker can resolve.
 [group('container-tests')]
@@ -126,63 +115,23 @@ test-e2e-podman configuration=config_default: (_e2e-image _e2e_podman_image _e2e
 # Build and run integration tests with npx as the LikeC4 server (WithLocalCLI Npx)
 [group('container-tests')]
 test-e2e-npm configuration=config_default: (_e2e-cli-image "aspirec4-e2e-npm" "npm")
-    docker run --rm --privileged \
-        -v "{{ justfile_directory() }}:/workspace:ro" \
-        {{ _e2e_cli_run_flags }} \
-        -w /workspace \
-        aspirec4-e2e-npm \
-        dotnet test \
-            --project src/tests/AspireC4.IntegrationTests \
-            --verbosity normal \
-            --configuration {{ configuration }}
+    just _e2e-cli-run aspirec4-e2e-npm {{ configuration }}
 # Build and run integration tests with pnpm dlx as the LikeC4 server (WithLocalCLI Pnpm)
 [group('container-tests')]
 test-e2e-pnpm configuration=config_default: (_e2e-cli-image "aspirec4-e2e-pnpm" "pnpm")
-    docker run --rm --privileged \
-        -v "{{ justfile_directory() }}:/workspace:ro" \
-        {{ _e2e_cli_run_flags }} \
-        -w /workspace \
-        aspirec4-e2e-pnpm \
-        dotnet test \
-            --project src/tests/AspireC4.IntegrationTests \
-            --verbosity normal \
-            --configuration {{ configuration }}
+    just _e2e-cli-run aspirec4-e2e-pnpm {{ configuration }}
 # Build and run integration tests with yarn dlx as the LikeC4 server (WithLocalCLI Yarn)
 [group('container-tests')]
 test-e2e-yarn configuration=config_default: (_e2e-cli-image "aspirec4-e2e-yarn" "yarn")
-    docker run --rm --privileged \
-        -v "{{ justfile_directory() }}:/workspace:ro" \
-        {{ _e2e_cli_run_flags }} \
-        -w /workspace \
-        aspirec4-e2e-yarn \
-        dotnet test \
-            --project src/tests/AspireC4.IntegrationTests \
-            --verbosity normal \
-            --configuration {{ configuration }}
+    just _e2e-cli-run aspirec4-e2e-yarn {{ configuration }}
 # Build and run integration tests with bunx as the LikeC4 server (WithLocalCLI Bun)
 [group('container-tests')]
 test-e2e-bun configuration=config_default: (_e2e-cli-image "aspirec4-e2e-bun" "bun")
-    docker run --rm --privileged \
-        -v "{{ justfile_directory() }}:/workspace:ro" \
-        {{ _e2e_cli_run_flags }} \
-        -w /workspace \
-        aspirec4-e2e-bun \
-        dotnet test \
-            --project src/tests/AspireC4.IntegrationTests \
-            --verbosity normal \
-            --configuration {{ configuration }}
+    just _e2e-cli-run aspirec4-e2e-bun {{ configuration }}
 # Build and run integration tests with deno as the LikeC4 server (WithLocalCLI Deno)
 [group('container-tests')]
 test-e2e-deno configuration=config_default: (_e2e-cli-image "aspirec4-e2e-deno" "deno")
-    docker run --rm --privileged \
-        -v "{{ justfile_directory() }}:/workspace:ro" \
-        {{ _e2e_cli_run_flags }} \
-        -w /workspace \
-        aspirec4-e2e-deno \
-        dotnet test \
-            --project src/tests/AspireC4.IntegrationTests \
-            --verbosity normal \
-            --configuration {{ configuration }}
+    just _e2e-cli-run aspirec4-e2e-deno {{ configuration }}
 # Build both e2e test images and run integration tests for Docker and Podman
 [group('container-tests')]
 test-e2e configuration=config_default: (test-e2e-docker configuration) (test-e2e-podman configuration)
@@ -198,6 +147,26 @@ _e2e-image image dockerfile:
 [private]
 _e2e-cli-image image target:
     docker build --target {{ target }} -f {{ _e2e_dockerfile_cli }} -t {{ image }} .
+# Run a pre-built local-CLI e2e image.
+# Workspace is writable (needed by NuGet restore). Named volumes redirect build artefacts
+# and package manager caches so they don't accumulate on the host across runs.
+# Lock-file isolation is enforced in the entrypoint (pre-installs run from /tmp).
+[private]
+_e2e-cli-run image configuration:
+    docker run --rm --privileged \
+        -v "{{ justfile_directory() }}:/workspace" \
+        -v aspirec4-nuget-cache:/root/.nuget/packages \
+        -v aspirec4-testbin:/workspace/src/tests/AspireC4.IntegrationTests/bin \
+        -v aspirec4-testobj:/workspace/src/tests/AspireC4.IntegrationTests/obj \
+        -v aspirec4-testhost-bin:/workspace/src/src/AspireC4.TestAppHost/bin \
+        -v aspirec4-testhost-obj:/workspace/src/src/AspireC4.TestAppHost/obj \
+        -v aspirec4-nodeapp-modules:/workspace/samples/node-app/node_modules \
+        -w /workspace \
+        {{ image }} \
+        dotnet test \
+            --project src/tests/AspireC4.IntegrationTests \
+            --verbosity normal \
+            --configuration {{ configuration }}
 [private]
 _run-likec4 path=justfile_dir():
     just _try-docker {{ path }} || just _try-node {{ path }}

@@ -10,7 +10,7 @@
 #   docker build --target deno -f tests/Docker/Dockerfile.e2e-cli -t aspirec4-e2e-deno .
 #
 #   docker run --rm --privileged \
-#     -v $(pwd):/workspace:ro \
+#     -v $(pwd):/workspace \
 #     -v aspirec4-testbin:/workspace/src/tests/AspireC4.IntegrationTests/bin \
 #     -v aspirec4-testobj:/workspace/src/tests/AspireC4.IntegrationTests/obj \
 #     -v aspirec4-testhost-bin:/workspace/src/src/AspireC4.TestAppHost/bin \
@@ -20,13 +20,10 @@
 #     aspirec4-e2e-npm \
 #     dotnet test src/tests/AspireC4.IntegrationTests --no-build
 #
-# ASPIREC4_CLI_RUNTIME is set per-stage and read by TestAppHost/Program.cs to call
-# .WithLocalCLI(runtime), routing the LikeC4 server through the local CLI instead
-# of the ghcr.io/likec4/likec4 Docker container.
-#
-# Isolation: all package manager pre-install operations run from /tmp so that lock
-# files (pnpm-lock.yaml, yarn.lock, bun.lockb, etc.) are never written into the
-# bind-mounted workspace.
+# Isolation: the workspace is writable (NuGet restore writes obj/ files across all projects).
+# Lock files from package managers are isolated to /tmp by the entrypoint — they are never
+# written into the workspace. Named volumes keep build artefacts and the NuGet cache on the
+# Docker side so they don't accumulate on the host.
 
 # ── Base ──────────────────────────────────────────────────────────────────────
 
@@ -69,10 +66,10 @@ echo "Pre-installing likec4 (runtime: ${ASPIREC4_CLI_RUNTIME})..."
 cd /tmp
 case "${ASPIREC4_CLI_RUNTIME}" in
     Npx)  npx --yes likec4 --version ;;
-    Pnpm) pnpm --ignore-workspace dlx likec4 --version ;;
-    Yarn) yarn dlx likec4 --version ;;
+    Pnpm) pnpm dlx --ignore-workspace likec4 --version ;;
+    Yarn) YARN_NODE_LINKER=node-modules yarn dlx --package likec4 --package react --package react-dom likec4 --version ;;
     Bun)  bunx likec4 --version ;;
-    Deno) ;;  # Deno caches modules on first use; no pre-install needed
+    Deno) deno run --allow-all --node-modules-dir=none npm:likec4 --version ;;
     *)    echo "Unknown ASPIREC4_CLI_RUNTIME: ${ASPIREC4_CLI_RUNTIME}" ;;
 esac || echo "WARNING: likec4 pre-install failed (non-fatal, will retry at serve time)"
 cd /workspace
@@ -122,4 +119,5 @@ FROM base AS deno
 RUN curl -fsSL https://deno.land/install.sh | sh
 ENV DENO_INSTALL="/root/.deno"
 ENV PATH="$DENO_INSTALL/bin:$PATH"
+ENV DENO_NO_UPDATE_CHECK=1
 ENV ASPIREC4_CLI_RUNTIME=Deno

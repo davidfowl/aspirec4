@@ -176,19 +176,25 @@ static class AspireC4Builder
 	/// </summary>
 	/// <example>
 	/// Npx  → <c>("npx",  ["likec4"])</c> so the full call is <c>npx likec4 format ...</c>
-	/// Pnpm → <c>("pnpm", ["exec", "likec4"])</c>
+	/// Pnpm → <c>("pnpm", ["dlx", "likec4"])</c>
 	/// Yarn → <c>("yarn", ["dlx", "likec4"])</c>
 	/// Bun  → <c>("bunx", ["--bun", "likec4"])</c>
-	/// Deno → <c>("deno", ["run", "--allow-all", "likec4"])</c>
+	/// Deno → <c>("deno", ["run", "--allow-all", "npm:likec4"])</c>
 	/// </example>
 	public static (string Command, string[] Prefix) BuildLikeC4CLIPrefix(LocalCLIRuntime runtime) =>
 		runtime switch
 		{
 			LocalCLIRuntime.Npx => ("npx", ["likec4"]),
-			LocalCLIRuntime.Pnpm => ("pnpm", ["exec", "likec4"]),
-			LocalCLIRuntime.Yarn => ("yarn", ["dlx", "likec4"]),
+			LocalCLIRuntime.Pnpm => ("pnpm", ["dlx", "--ignore-workspace", "likec4"]),
+			// Yarn Berry's dlx does not install optional peer dependencies (react, react-dom) by
+			// default. Explicitly pass them as --package arguments so they are present in the
+			// isolated environment and likec4 can resolve them at startup.
+			LocalCLIRuntime.Yarn => (
+				"yarn",
+				["dlx", "--package", "likec4", "--package", "react", "--package", "react-dom", "likec4"]
+			),
 			LocalCLIRuntime.Bun => ("bunx", ["likec4"]),
-			LocalCLIRuntime.Deno => ("deno", ["run", "--allow-all", "likec4"]),
+			LocalCLIRuntime.Deno => ("deno", ["run", "--allow-all", "npm:likec4"]),
 			_ => throw new ArgumentOutOfRangeException(nameof(runtime), runtime, $"Unsupported runtime: {runtime}"),
 		};
 
@@ -206,12 +212,44 @@ static class AspireC4Builder
 		return runtime switch
 		{
 			LocalCLIRuntime.Npx => ("npx", ["likec4", "serve", outputDirectory, "--port", portStr]),
-			LocalCLIRuntime.Pnpm => ("pnpm", ["exec", "likec4", "serve", outputDirectory, "--port", portStr]),
-			LocalCLIRuntime.Yarn => ("yarn", ["dlx", "likec4", "serve", outputDirectory, "--port", portStr]),
+			LocalCLIRuntime.Pnpm => (
+				"pnpm",
+				["dlx", "--ignore-workspace", "likec4", "serve", outputDirectory, "--port", portStr]
+			),
+			// Explicitly include react and react-dom so yarn dlx adds them to the isolated
+			// environment alongside likec4 (peer deps are not installed automatically in Berry).
+			LocalCLIRuntime.Yarn => (
+				"yarn",
+				[
+					"dlx",
+					"--package",
+					"likec4",
+					"--package",
+					"react",
+					"--package",
+					"react-dom",
+					"likec4",
+					"serve",
+					outputDirectory,
+					"--port",
+					portStr,
+				]
+			),
 			LocalCLIRuntime.Bun => ("bunx", ["--bun", "likec4", "serve", outputDirectory, "--port", portStr]),
+			// --node-modules-dir=none tells deno to use its virtual module cache rather than
+			// creating a physical node_modules tree in the working directory (slow for 130+ pkgs).
 			LocalCLIRuntime.Deno => (
 				"deno",
-				["run", "--allow-all", "likec4", "serve", outputDirectory, "--port", portStr]
+				[
+					"run",
+					"--allow-all",
+					"--node-modules-dir=none",
+					"npm:likec4",
+					"serve",
+					outputDirectory,
+					"--port",
+					portStr,
+				]
 			),
 			_ => throw new ArgumentOutOfRangeException(nameof(runtime), runtime, $"Unsupported runtime: {runtime}"),
 		};
