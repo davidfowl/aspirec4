@@ -39,8 +39,7 @@ sealed partial class AspireC4LifecycleHook
 			_dashboardBaseUrl,
 			dashboardBrowserToken,
 			opts.StateTagMap,
-			resourceSnapshotUrls,
-			opts.Strict
+			resourceSnapshotUrls
 		);
 		var dsl = LikeC4DSLGenerator.Generate(model, opts);
 

@@ -19,7 +19,7 @@ public sealed partial class AspireC4BuilderTests
 	}
 
 	[Test]
-	public async Task BuildLocalCLICommand_Pnpm_UsesPnpmExec()
+	public async Task BuildLocalCLICommand_Pnpm_UsesPnpmDlx()
 	{
 		// Arrange
 
@@ -28,7 +28,9 @@ public sealed partial class AspireC4BuilderTests
 
 		// Assert
 		await Assert.That(command).IsEqualTo("pnpm");
-		await Assert.That(args).IsEquivalentTo(["exec", "likec4", "serve", "/tmp/likec4", "--port", "5173"]);
+		await Assert
+			.That(args)
+			.IsEquivalentTo(["dlx", "--ignore-workspace", "likec4", "serve", "/tmp/likec4", "--port", "5173"]);
 	}
 
 	[Test]
@@ -41,7 +43,22 @@ public sealed partial class AspireC4BuilderTests
 
 		// Assert
 		await Assert.That(command).IsEqualTo("yarn");
-		await Assert.That(args).IsEquivalentTo(["dlx", "likec4", "serve", "/tmp/likec4", "--port", "5173"]);
+		await Assert
+			.That(args)
+			.IsEquivalentTo([
+				"dlx",
+				"--package",
+				"likec4",
+				"--package",
+				"react",
+				"--package",
+				"react-dom",
+				"likec4",
+				"serve",
+				"/tmp/likec4",
+				"--port",
+				"5173",
+			]);
 	}
 
 	[Test]
@@ -55,6 +72,30 @@ public sealed partial class AspireC4BuilderTests
 		// Assert
 		await Assert.That(command).IsEqualTo("bunx");
 		await Assert.That(args).IsEquivalentTo(["--bun", "likec4", "serve", "/tmp/likec4", "--port", "5173"]);
+	}
+
+	[Test]
+	public async Task BuildLocalCLICommand_Deno_UsesDenoRunWithNodeModulesDirNone()
+	{
+		// Arrange
+
+		// Act
+		var (command, args) = AspireC4Builder.BuildLocalCLICommand(LocalCLIRuntime.Deno, "/tmp/likec4", 5173);
+
+		// Assert
+		await Assert.That(command).IsEqualTo("deno");
+		await Assert
+			.That(args)
+			.IsEquivalentTo([
+				"run",
+				"--allow-all",
+				"--node-modules-dir=none",
+				"npm:likec4",
+				"serve",
+				"/tmp/likec4",
+				"--port",
+				"5173",
+			]);
 	}
 
 	[Test]

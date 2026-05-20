@@ -8,7 +8,6 @@
     ]
   },
   "imageAliases": {
-    "@": "../../../../../assets/images/",
-    "@test-icons": "../../bin/Debug/net8.0/likec4-images"
+    "@": "../../../../../assets/images/"
   }
 }

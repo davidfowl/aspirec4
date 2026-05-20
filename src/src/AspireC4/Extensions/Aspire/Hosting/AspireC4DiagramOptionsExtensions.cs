@@ -168,23 +168,12 @@ public static class AspireC4DiagramOptionsExtensions
 		/// Adds a custom relationship kind specification to the <c>specification { }</c> block.
 		/// </summary>
 		/// <param name="spec">The relationship kind specification to add.</param>
-		/// <param name="strict">
-		/// Controls whether this kind is registered in the strict allowed-kinds list.
-		/// <list type="bullet">
-		///   <item><description><see langword="null"/> (default) — auto: adds to the allowed list if <see cref="AspireC4StrictMode.RelationshipKinds"/> is already enabled on the current options.</description></item>
-		///   <item><description><see langword="true"/> — always add to the allowed list.</description></item>
-		///   <item><description><see langword="false"/> — never add to the allowed list.</description></item>
-		/// </list>
-		/// </param>
 		/// <seealso cref="AspireC4DiagramOptions.RelationshipKindSpecs"/>
-		public AspireC4DiagramOptions WithRelationshipKindSpec(LikeC4RelationshipKindSpec spec, bool? strict = null)
+		public AspireC4DiagramOptions WithRelationshipKindSpec(LikeC4RelationshipKindSpec spec)
 		{
 			ArgumentNullException.ThrowIfNull(options);
 			ArgumentNullException.ThrowIfNull(spec);
 			options.RelationshipKindSpecs.Add(spec);
-			if (strict ?? options.Strict.Mode.HasFlag(AspireC4StrictMode.RelationshipKinds))
-				options.WithAllowedRelationshipKind(spec.Name);
-
 			return options;
 		}
 
@@ -193,27 +182,12 @@ public static class AspireC4DiagramOptionsExtensions
 		/// </summary>
 		/// <param name="name">The kind identifier, e.g. <c>"async"</c> or <c>"grpc"</c>.</param>
 		/// <param name="technology">Optional default technology label for all relationships of this kind (e.g. <c>"AMQP"</c>, <c>"gRPC"</c>).</param>
-		/// <param name="strict">
-		/// Controls whether this kind is registered in the strict allowed-kinds list.
-		/// <list type="bullet">
-		///   <item><description><see langword="null"/> (default) — auto: adds to the allowed list if <see cref="AspireC4StrictMode.RelationshipKinds"/> is already enabled on the current options.</description></item>
-		///   <item><description><see langword="true"/> — always add to the allowed list.</description></item>
-		///   <item><description><see langword="false"/> — never add to the allowed list.</description></item>
-		/// </list>
-		/// </param>
 		/// <returns>The same <see cref="AspireC4DiagramOptions"/> for further configuration.</returns>
-		public AspireC4DiagramOptions WithRelationshipKindSpec(
-			string name,
-			string? technology = null,
-			bool? strict = null
-		)
+		public AspireC4DiagramOptions WithRelationshipKindSpec(string name, string? technology = null)
 		{
 			ArgumentNullException.ThrowIfNull(options);
 			ArgumentException.ThrowIfNullOrWhiteSpace(name);
 			options.RelationshipKindSpecs.Add(new LikeC4RelationshipKindSpec(name, technology));
-			if (strict ?? options.Strict.Mode.HasFlag(AspireC4StrictMode.RelationshipKinds))
-				options.WithAllowedRelationshipKind(name);
-
 			return options;
 		}
 
@@ -250,6 +224,15 @@ public static class AspireC4DiagramOptionsExtensions
 		{
 			ArgumentNullException.ThrowIfNull(options);
 			options.IncludeAspireDashboardLinks = include;
+			return options;
+		}
+
+		/// <summary>Enables or disables using GraphViz' Dot tool if available.</summary>
+		/// <seealso cref="AspireC4DiagramOptions.UseDotIfAvailable"/>
+		public AspireC4DiagramOptions WithUseDotIfAvailable(bool useDotIfAvailable)
+		{
+			ArgumentNullException.ThrowIfNull(options);
+			options.UseDotIfAvailable = useDotIfAvailable;
 			return options;
 		}
 
@@ -291,70 +274,6 @@ public static class AspireC4DiagramOptionsExtensions
 			ArgumentNullException.ThrowIfNull(options);
 			ArgumentNullException.ThrowIfNull(resolver);
 			options.IconResolvers.Add(resolver);
-			return options;
-		}
-
-		/// <summary>
-		/// Sets the strict validation mode. The provided <paramref name="mode"/> replaces the current mode.
-		/// Use the bitwise OR operator to combine multiple flags:
-		/// <c>AspireC4StrictMode.Tags | AspireC4StrictMode.Groups</c>.
-		/// </summary>
-		/// <seealso cref="AspireC4DiagramOptions.Strict"/>
-		/// <seealso cref="AspireC4StrictMode"/>
-		public AspireC4DiagramOptions WithStrictMode(AspireC4StrictMode mode)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			options.Strict.Mode = mode;
-			return options;
-		}
-
-		/// <summary>
-		/// Adds a tag to the list of tags permitted under <see cref="AspireC4StrictMode.Tags"/>.
-		/// A leading <c>#</c> is accepted and stripped automatically.
-		/// </summary>
-		/// <seealso cref="AspireC4StrictOptions.Tags"/>
-		public AspireC4DiagramOptions WithAllowedTag(string tag)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			ArgumentException.ThrowIfNullOrWhiteSpace(tag);
-			options.Strict.Tags.Add(Helpers.NormaliseTag(tag));
-			return options;
-		}
-
-		/// <summary>
-		/// Adds a relationship kind identifier to the list of kinds permitted under
-		/// <see cref="AspireC4StrictMode.RelationshipKinds"/>.
-		/// </summary>
-		/// <seealso cref="AspireC4StrictOptions.RelationshipKinds"/>
-		public AspireC4DiagramOptions WithAllowedRelationshipKind(string kind)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-			options.Strict.RelationshipKinds.Add(kind);
-			return options;
-		}
-
-		/// <summary>
-		/// Adds a group name to the list of groups permitted under <see cref="AspireC4StrictMode.Groups"/>.
-		/// </summary>
-		/// <seealso cref="AspireC4StrictOptions.Groups"/>
-		public AspireC4DiagramOptions WithAllowedGroup(string groupName)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			ArgumentException.ThrowIfNullOrWhiteSpace(groupName);
-			options.Strict.Groups.Add(groupName);
-			return options;
-		}
-
-		/// <summary>
-		/// Adds a metadata key to the list of keys permitted under <see cref="AspireC4StrictMode.MetadataKeys"/>.
-		/// </summary>
-		/// <seealso cref="AspireC4StrictOptions.MetadataKeys"/>
-		public AspireC4DiagramOptions WithAllowedMetadataKey(string key)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			ArgumentException.ThrowIfNullOrWhiteSpace(key);
-			options.Strict.MetadataKeys.Add(key);
 			return options;
 		}
 	}

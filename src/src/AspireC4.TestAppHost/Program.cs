@@ -1,14 +1,13 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 // Add LikeC4 visualization to the application. This will allow us to visualize the components and their relationships in a C4 model.
-builder
-	.AddAspireC4(configure: static opts =>
-		// Validate the C4 model before starting the application to catch any issues early.
-		opts.WithValidateBeforeStart()
-			.WithTitle("AspireC4 Test App")
-			.WithViewTitle("AspireC4 Architecture")
-			.WithViewDescription(
-				@"
+var c4 = builder.AddAspireC4(configure: static opts =>
+	// Validate the C4 model before starting the application to catch any issues early.
+	opts.WithValidateBeforeStart()
+		.WithTitle("AspireC4 Test App")
+		.WithViewTitle("AspireC4 Architecture")
+		.WithViewDescription(
+			@"
 This **LikeC4** view was automatically generated from the **Aspire** resource graph, using the **AspireC4** hosting extension.
 
 For more details on all of these tools and components, see:
@@ -17,11 +16,17 @@ For more details on all of these tools and components, see:
 - [LikeC4](https://likec4.dev/)
 - [AspireC4](https://kjl.dev/projects/aspirec4/)
 "
-			)
-			.WithStrictMode(AspireC4StrictMode.All)
-	)
-	// This is to configure certain parts of the AppHost and AspireC4 purely for this example test app.
-	.ConfigureTestHost();
+		)
+);
+
+// Allow Dockerfile-based test environments (e.g. Dockerfile.e2e-npm) to switch the LikeC4
+// server to a local JavaScript package manager CLI instead of the Docker container.
+var cliRuntimeStr = Environment.GetEnvironmentVariable("ASPIREC4_CLI_RUNTIME");
+if (cliRuntimeStr is not null && Enum.TryParse<LocalCLIRuntime>(cliRuntimeStr, ignoreCase: true, out var cliRuntime))
+	c4.WithLocalCLI(cliRuntime);
+
+// This is to configure certain parts of the AppHost and AspireC4 purely for this example test app.
+c4.ConfigureTestHost();
 
 // Azure managed resources (containers when local).
 var azureManagerRedis = builder
@@ -100,9 +105,11 @@ var localPostgres = builder
 		opts.WithDescription("For testing Azure Postgres vs. local Postgres")
 			.WithSummary("Local Postgres for development")
 			.WithLink("https://www.postgresql.org/", "Learn more about Postgres")
-			.WithTag("local-dev1")
+			// Naming this something else will create a diagnostic 'suggestion' as it's not in the AppLikeC4Registry
+			// ... you can always use AppLikeC4Registry.Tags.LocalDev to prevent typos.
+			.WithTag("local-dev")
 	)
-	.WithLikeC4Group("Local Dev/ Sync Group 1");
+	.WithLikeC4Group("Local Dev/ Sync Group");
 
 // Our app...
 var nodeApp = builder
@@ -110,33 +117,33 @@ var nodeApp = builder
 	// Add LikeC4 details to the component for better visualization in the C4 model.
 	.WithLikeC4Details(
 		label: "Sample Node App",
-		//technology: "Node.js",
 		description: "A sample Node.js application that connects to Azure Redis and Azure Postgres"
-	//icon: "tech:nodejs"
 	)
 	.WithNpm(install: true)
 	.WithHttpEndpoint(env: "PORT")
 	.WithUrlForEndpoint("http", url => url.Url = "/health")
-	// These references will be used to generate the connections in the C4 model and also ensure that the application waits for these dependencies to be ready before starting.
+	// These references will be used to generate the connections in the C4 model,
+	// _and_ ensure that the application has the connection strings for these dependencies by internally
+	// calling `.WithReference(...)`.
 	.WithLikeC4Reference(
 		azureManagerRedis,
 		opts => opts.WithLabel("Caches sessions").WithTechnology("Redis Protocol").WithKind("RESP")
 	)
-	.WaitFor(azureManagerRedis)
 	.WithLikeC4Reference(
 		localRedis,
 		opts => opts.WithLabel("Caches  sessions (local)").WithTechnology("Redis Protocol").WithKind("RESP")
 	)
-	.WaitFor(localRedis)
 	.WithLikeC4Reference(
 		azurePostgres,
 		opts => opts.WithLabel("Persists data").WithTechnology("PostgreSQL / JDBC").WithKind("tcp-ip")
 	)
-	.WaitFor(azurePostgres)
 	.WithLikeC4Reference(
 		localPostgres,
 		opts => opts.WithLabel("Persists data (local)").WithTechnology("PostgreSQL / JDBC").WithKind("tcp-ip")
 	)
+	.WaitFor(azureManagerRedis)
+	.WaitFor(localRedis)
+	.WaitFor(azurePostgres)
 	.WaitFor(localPostgres);
 
 localPostgres.WithLikeC4Reference(

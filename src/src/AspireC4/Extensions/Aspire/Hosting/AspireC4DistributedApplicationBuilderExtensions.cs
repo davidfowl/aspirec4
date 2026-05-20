@@ -59,24 +59,7 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 				opts.OutputDirectory = ResolveOutputDirectory(builder.AppHostDirectory, opts.OutputDirectory);
 			});
 
-		// Apply registry values from the source-generator-produced module initializer, then
-		// allow configuration (env vars, appsettings) to override the strict mode that the
-		// user may have set inside their configure callback — BindConfiguration runs before
-		// Configure callbacks, so an env-var override would otherwise be overwritten.
-		var configuration = builder.Configuration;
-		builder.Services.PostConfigure<AspireC4DiagramOptions>(opts =>
-		{
-			LikeC4RegistryBridge.Apply(opts.Strict);
-
-			var strictModeRaw = configuration[$"{AspireC4DiagramOptions.SectionName}:Strict:Mode"];
-			if (
-				!string.IsNullOrEmpty(strictModeRaw)
-				&& Enum.TryParse<AspireC4StrictMode>(strictModeRaw, ignoreCase: true, out var overrideMode)
-			)
-				opts.Strict.Mode = overrideMode;
-		});
-
-		var diagramOpts = new AspireC4DiagramOptions();
+		AspireC4DiagramOptions diagramOpts = new();
 		configure?.Invoke(diagramOpts);
 
 		var outputDir = ResolveOutputDirectory(builder.AppHostDirectory, diagramOpts.OutputDirectory);
@@ -154,8 +137,9 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 					context.Args.Add($"\"{diagramOpts.Title}\"");
 				}
 
-				var dot = await Helpers.IsDotAvailableAsync(context.CancellationToken);
-				if (dot)
+				var useDot =
+					diagOpts.Value.UseDotIfAvailable && await Helpers.IsDotAvailableAsync(context.CancellationToken);
+				if (useDot)
 					context.Args.Add("--use-dot");
 
 				context.Args.Add("--port");
@@ -163,9 +147,15 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 				if (diagOpts.Value.DisableHMR)
 					context.Args.Add("--no-react-hmr");
 			})
-			//.WithExternalHttpEndpoints()
 			// Exclude the sidecar from the architecture diagram — it is tooling, not a system element.
-			.ExcludeFromLikeC4();
+			.ExcludeFromLikeC4()
+			.ExcludeFromManifest();
+		//			.WithInitialState(new CustomResourceSnapshot
+		//			{
+		//				ResourceType = nameof(LikeC4ServerResource),
+		////				IsHidden = true,
+		//				Properties = []
+		//			});
 
 		if (!diagramOpts.DisableHMR)
 		{
@@ -201,7 +191,21 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 
 		AspireC4Resource aspirec4Resource = new(name, outputDir) { InnerResource = serverResource };
 
-		return builder.AddResource(aspirec4Resource);
+		return builder
+			.AddResource(aspirec4Resource)
+			.ExcludeFromLikeC4()
+			.ExcludeFromManifest()
+			.WithInitialState(
+				new CustomResourceSnapshot
+				{
+					// Shown as a container type since it IS backed by a container (or local CLI).
+					// URLs, state, and properties are forwarded from the inner resource at runtime
+					// by ForwardInnerResourceStateAsync so this entry stays accurate.
+					ResourceType = "Container",
+					IsHidden = false,
+					Properties = [],
+				}
+			);
 	}
 
 	static string ResolveOutputDirectory(string appHostDirectory, string outputDirectory)

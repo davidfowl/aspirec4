@@ -34,19 +34,15 @@ static class AspireC4Extensions
 		// We're adding LikeC4 pazzazz to the LikeC4 server resource for this demo...
 		builder.ConfigureServer(s =>
 			s.WithLikeC4Details(opts =>
-				opts.WithLabel("LikeC4")
+				opts.WithLabel("AspireC4")
 					.WithSummary(
-						"Describe your system architecture with code. Visualize, validate and share — all from a single source of truth."
-					)
-					.WithDescription(
-						"A tool for describing your system architecture with code, allowing you to visualize, validate, and share your architecture from a single source of truth."
+						"Describe your Aspire orchestration as a live LikeC4 system architecture diagram - auto generated"
 					)
 					// This icon supports both light and dark mode in one...
 					.WithIcon("@/likec4/likec4-wordmark.svg")
-					.WithLink("https://likec4.dev/", "Learn more about LikeC4")
-					.WithLink("https://github.com/likec4/likec4/", "LikeC4 on GitHub")
-					.WithLink("https://github.com/sponsors/likec4", "Sponsor LikeC4 🩷")
-					.WithLink("https://github.com/davydkov", "Connect with the author on GitHub")
+					.WithLink("https://kjl.dev/projects/aspirec4", "Learn more about AspireC4")
+					.WithLink("https://github.com/kjldev/aspirec4/", "AspireC4 on GitHub")
+					.WithLink("https://github.com/kieronlanning", "Connect with the author on GitHub")
 			)
 		);
 

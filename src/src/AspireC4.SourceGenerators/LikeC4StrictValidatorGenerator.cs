@@ -16,8 +16,8 @@ namespace Aspire.Hosting.AspireC4.SourceGenerators;
 /// <list type="bullet">
 ///   <item>
 ///     <description>
-///       <b>DSL file mode</b>: activated when <c>&lt;AspireC4Strict&gt;true&lt;/AspireC4Strict&gt;</c> is set
-///       in the consuming project. <c>.c4</c>/<c>.likec4</c> additional files are parsed for
+///       <b>DSL file mode</b>: activated when <c>&lt;AspireC4Strict&gt;...&lt;/AspireC4Strict&gt;</c> is set
+///       in the consuming project to a non-off severity. <c>.c4</c>/<c>.likec4</c> additional files are parsed for
 ///       <c>specification</c> block declarations (<c>tag</c>, <c>element</c>, <c>relationship</c>).
 ///       All <c>.WithTag()</c> and <c>.WithKind()</c> call-site values are validated against those.
 ///     </description>
@@ -83,7 +83,7 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		defaultSeverity: DiagnosticSeverity.Warning,
 		isEnabledByDefault: true,
 		description: "All tags passed to WithTag() must be declared in the LikeC4 specification block of an additional "
-			+ ".c4 file (when AspireC4Strict=true), or as public const string fields in the Tags nested class "
+			+ ".c4 file (when AspireC4Strict has a non-off severity), or as public const string fields in the Tags nested class "
 			+ "of a [LikeC4Registry]-annotated class."
 	);
 
@@ -101,7 +101,7 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		defaultSeverity: DiagnosticSeverity.Warning,
 		isEnabledByDefault: true,
 		description: "All kinds passed to WithKind() must be declared in the LikeC4 specification block of an additional "
-			+ ".c4 file (when AspireC4Strict=true), or as public const string fields in the ElementKinds or "
+			+ ".c4 file (when AspireC4Strict has a non-off severity), or as public const string fields in the ElementKinds or "
 			+ "RelationshipKinds nested class of a [LikeC4Registry]-annotated class."
 	);
 
@@ -127,6 +127,19 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		isEnabledByDefault: true,
 		description: "All group names passed to WithLikeC4Group() must be declared as public const string fields "
 			+ "in the Groups nested class of a [LikeC4Registry]-annotated class."
+	);
+
+	/// <summary>Emitted when a <c>.WithMetadata()</c> key argument is not declared in the active definitions.</summary>
+	public static readonly DiagnosticDescriptor UndeclaredMetadataKey = new(
+		id: "ASPIREC4006",
+		title: "Undeclared LikeC4 metadata key",
+		messageFormat: "Metadata key '{0}' is not declared. Add it as 'public const string' in the 'MetadataKeys' nested class of your [LikeC4Registry] class.",
+		category: "AspireC4",
+		defaultSeverity: DiagnosticSeverity.Warning,
+		isEnabledByDefault: true,
+		description: "All metadata keys passed to WithMetadata() must be declared as public const string fields "
+			+ "in the MetadataKeys nested class of a [LikeC4Registry]-annotated class. "
+			+ "Keys are compared after normalising whitespace and punctuation to underscores, and are case-insensitive."
 	);
 
 	/// <summary>
@@ -166,8 +179,8 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		+ "    [System.AttributeUsage(System.AttributeTargets.Class, Inherited = false, AllowMultiple = false)]\n"
 		+ "    internal sealed class LikeC4RegistryAttribute : System.Attribute\n"
 		+ "    {\n"
-		+ "        /// <summary>Registry-level strict mode override. Default is <see cref=\"LikeC4StrictMode.Inherit\"/>.</summary>\n"
-		+ "        public LikeC4StrictMode Strict { get; init; } = LikeC4StrictMode.Inherit;\n"
+		+ "        /// <summary>Registry-level diagnostic severity override. Default is <see cref=\"LikeC4Severity.Inherit\"/>.</summary>\n"
+		+ "        public LikeC4Severity Strict { get; init; } = LikeC4Severity.Inherit;\n"
 		+ "    }\n"
 		+ "\n"
 		+ "    /// <summary>Identifies which LikeC4 registry type a constant belongs to.</summary>\n"
@@ -185,15 +198,19 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		+ "        MetadataKey = 4,\n"
 		+ "    }\n"
 		+ "\n"
-		+ "    /// <summary>Controls strict validation behaviour for a registry class or type.</summary>\n"
-		+ "    internal enum LikeC4StrictMode\n"
+		+ "    /// <summary>Controls the diagnostic severity for a registry class or type.</summary>\n"
+		+ "    internal enum LikeC4Severity\n"
 		+ "    {\n"
-		+ "        /// <summary>Inherits strict mode from the parent scope (registry attribute or global MSBuild property).</summary>\n"
+		+ "        /// <summary>Inherits severity from the parent scope (registry → MSBuild → default Suggestion when [LikeC4Registry] exists).</summary>\n"
 		+ "        Inherit = 0,\n"
-		+ "        /// <summary>Enables strict validation regardless of the parent scope setting.</summary>\n"
-		+ "        Enable = 1,\n"
-		+ "        /// <summary>Disables strict validation regardless of the parent scope setting.</summary>\n"
-		+ "        Disable = 2,\n"
+		+ "        /// <summary>Disables validation for this scope entirely.</summary>\n"
+		+ "        Off = 1,\n"
+		+ "        /// <summary>Emits an IDE suggestion (hidden diagnostic).</summary>\n"
+		+ "        Suggestion = 2,\n"
+		+ "        /// <summary>Emits a compiler warning.</summary>\n"
+		+ "        Warning = 3,\n"
+		+ "        /// <summary>Emits a compiler error, preventing build success.</summary>\n"
+		+ "        Error = 4,\n"
 		+ "    }\n"
 		+ "\n"
 		+ "    /// <summary>\n"
@@ -205,15 +222,15 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		+ "        public KnownTypeAttribute(LikeC4RegistryType type) { Type = type; }\n"
 		+ "        /// <summary>The registry type this constant belongs to.</summary>\n"
 		+ "        public LikeC4RegistryType Type { get; }\n"
-		+ "        /// <summary>Per-type strict mode override. Default is <see cref=\"LikeC4StrictMode.Inherit\"/>.</summary>\n"
-		+ "        public LikeC4StrictMode Strict { get; init; } = LikeC4StrictMode.Inherit;\n"
+		+ "        /// <summary>Per-type severity override. Default is <see cref=\"LikeC4Severity.Inherit\"/>.</summary>\n"
+		+ "        public LikeC4Severity Strict { get; init; } = LikeC4Severity.Inherit;\n"
 		+ "    }\n"
 		+ "}\n";
 
 	/// <inheritdoc />
 	public void Initialize(IncrementalGeneratorInitializationContext context)
 	{
-		// Always inject [LikeC4Registry], LikeC4RegistryType, LikeC4StrictMode, and [KnownType] so that
+		// Always inject [LikeC4Registry], LikeC4RegistryType, LikeC4Severity, and [KnownType] so that
 		// user code referencing these types compiles regardless of the disable flag.
 		context.RegisterPostInitializationOutput(static ctx =>
 			ctx.AddSource("LikeC4RegistryAttributes.g.cs", SourceText.From(AttributeSource, Encoding.UTF8))
@@ -228,12 +245,11 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			}
 		);
 
-		// Mode 1: DSL additional file definitions — opt-in via <AspireC4Strict>true</AspireC4Strict>.
-		var isStrictMode = context.AnalyzerConfigOptionsProvider.Select(
+		var globalStrict = context.AnalyzerConfigOptionsProvider.Select(
 			static (opts, _) =>
 			{
 				opts.GlobalOptions.TryGetValue("build_property.AspireC4Strict", out var val);
-				return string.Equals(val, "true", StringComparison.OrdinalIgnoreCase);
+				return ParseGlobalStrict(val);
 			}
 		);
 
@@ -256,34 +272,24 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		var tagCallSites = CreateCallSiteProvider(context, WithTagMethodName).Collect();
 		var kindCallSites = CreateCallSiteProvider(context, WithKindMethodName).Collect();
 		var groupCallSites = CreateCallSiteProvider(context, WithGroupMethodName).Collect();
+		var metadataCallSites = CreateMetadataCallSiteProvider(context).Collect();
 
 		// Combine everything and validate.
 		context.RegisterSourceOutput(
 			isDisabled
-				.Combine(isStrictMode)
+				.Combine(globalStrict)
 				.Combine(dslDefinitions)
 				.Combine(classDefinitions)
 				.Combine(tagCallSites)
 				.Combine(kindCallSites)
-				.Combine(groupCallSites),
+				.Combine(groupCallSites)
+				.Combine(metadataCallSites),
 			static (ctx, data) =>
 			{
-				var ((((((isDisabled, isStrict), dslDefs), classDefs), tags), kinds), groups) = data;
+				var (((((((isDisabled, globalStrict), dslDefs), classDefs), tags), kinds), groups), metadata) = data;
 				if (isDisabled)
 					return;
-				Validate(ctx, isStrict, dslDefs, classDefs, tags, kinds, groups);
-			}
-		);
-
-		// Generate the module initializer that populates LikeC4RegistryBridge at runtime.
-		context.RegisterSourceOutput(
-			isDisabled.Combine(classDefinitions),
-			static (ctx, data) =>
-			{
-				var (isDisabled, classDefs) = data;
-				if (isDisabled || classDefs.IsEmpty)
-					return;
-				GenerateRegistryInitializer(ctx, classDefs[0]);
+				Validate(ctx, globalStrict, dslDefs, classDefs, tags, kinds, groups, metadata);
 			}
 		);
 	}
@@ -431,7 +437,7 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			var fieldStrictMode =
 				strictArg.Value.Kind == TypedConstantKind.Enum && strictArg.Value.Value is int strictInt
 					? strictInt
-					: ClassDefinitions.StrictInherit;
+					: ClassDefinitions.SeverityInherit;
 
 			var fieldLocation = field.Locations.Length > 0 ? field.Locations[0] : null;
 
@@ -443,15 +449,15 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			GetTargetList(registryTypeInt, tags, elementKinds, relationshipKinds, groups, metadataKeys)?.Add(value);
 		}
 
-		// Step 3: compute per-type strict modes from [KnownType] fields (most permissive / max wins).
+		// Step 3: compute per-type severity from [KnownType] fields (highest severity wins; Off suppresses).
 		int ComputeTypeStrictMode(int registryType) =>
 			knownTypeFieldsByType.TryGetValue(registryType, out var fields)
-				? fields.Aggregate(ClassDefinitions.StrictInherit, static (acc, f) => Math.Max(acc, f.StrictMode))
-				: ClassDefinitions.StrictInherit;
+				? fields.Aggregate(ClassDefinitions.SeverityInherit, static (acc, f) => Math.Max(acc, f.StrictMode))
+				: ClassDefinitions.SeverityInherit;
 
-		// Step 4: read registry-level strict from [LikeC4Registry(Strict = ...)] (ctx.Attributes[0]).
+		// Step 4: read registry-level severity from [LikeC4Registry(Strict = ...)] (ctx.Attributes[0]).
 		var registryAttr = ctx.Attributes.Length > 0 ? ctx.Attributes[0] : null;
-		var registryStrictMode = ClassDefinitions.StrictInherit;
+		var registryStrictMode = ClassDefinitions.SeverityInherit;
 		if (registryAttr is not null)
 		{
 			var strictArg = registryAttr.NamedArguments.FirstOrDefault(static a => a.Key == "Strict");
@@ -531,6 +537,22 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			.Select(static (v, _) => v!.Value);
 	}
 
+	/// <summary>
+	/// Collects the first argument (key) of every <c>.WithMetadata(key, value)</c> call site.
+	/// </summary>
+	static IncrementalValuesProvider<CallSiteInfo> CreateMetadataCallSiteProvider(
+		IncrementalGeneratorInitializationContext context
+	)
+	{
+		return context
+			.SyntaxProvider.CreateSyntaxProvider(
+				predicate: static (node, _) => IsTargetInvocation(node, "WithMetadata"),
+				transform: static (ctx, ct) => ExtractCallSiteInfo(ctx, ct)
+			)
+			.Where(static v => v.HasValue)
+			.Select(static (v, _) => v!.Value);
+	}
+
 	static bool IsTargetInvocation(SyntaxNode node, string methodName) =>
 		node
 			is InvocationExpressionSyntax
@@ -553,17 +575,56 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 
 	// --- Validation ---
 
+	static (DiagnosticSeverity? Severity, bool IncludesMetadata) ParseGlobalStrict(string? val)
+	{
+		if (string.IsNullOrWhiteSpace(val))
+			return (null, false);
+
+		var normalized = val!.Trim();
+		if (normalized.Equals("off", StringComparison.OrdinalIgnoreCase))
+			return (null, false);
+		if (normalized.Equals("suggestion", StringComparison.OrdinalIgnoreCase))
+			return (DiagnosticSeverity.Info, false);
+		if (normalized.Equals("warning", StringComparison.OrdinalIgnoreCase))
+			return (DiagnosticSeverity.Warning, false);
+		if (
+			normalized.Equals("error", StringComparison.OrdinalIgnoreCase)
+			|| normalized.Equals("true", StringComparison.OrdinalIgnoreCase)
+			|| normalized.Equals("yes", StringComparison.OrdinalIgnoreCase)
+			|| normalized.Equals("all", StringComparison.OrdinalIgnoreCase)
+		)
+			return (DiagnosticSeverity.Error, false);
+		if (normalized.Equals("allincludingmetadata", StringComparison.OrdinalIgnoreCase))
+			return (DiagnosticSeverity.Error, true);
+
+		return (null, false);
+	}
+
+	static DiagnosticDescriptor WithSeverity(DiagnosticDescriptor descriptor, DiagnosticSeverity severity) =>
+		severity == descriptor.DefaultSeverity
+			? descriptor
+			: new DiagnosticDescriptor(
+				descriptor.Id,
+				descriptor.Title,
+				descriptor.MessageFormat,
+				descriptor.Category,
+				severity,
+				descriptor.IsEnabledByDefault,
+				descriptor.Description,
+				descriptor.HelpLinkUri
+			);
+
 	static void Validate(
 		SourceProductionContext ctx,
-		bool isStrictMode,
+		(DiagnosticSeverity? Severity, bool IncludesMetadata) globalStrict,
 		DslDefinitions dslDefs,
 		ImmutableArray<ClassDefinitions> classDefs,
 		ImmutableArray<CallSiteInfo> tagCallSites,
 		ImmutableArray<CallSiteInfo> kindCallSites,
-		ImmutableArray<CallSiteInfo> groupCallSites
+		ImmutableArray<CallSiteInfo> groupCallSites,
+		ImmutableArray<CallSiteInfo> metadataCallSites
 	)
 	{
-		// Enforce single registry class per assembly (report all duplicates beyond the first).
 		if (classDefs.Length > 1)
 		{
 			for (int i = 1; i < classDefs.Length; i++)
@@ -574,33 +635,54 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			}
 		}
 
-		// Emit ASPIREC4005 for any type declared both via nested class and [KnownType].
 		foreach (var def in classDefs)
 		{
 			foreach (var (typeName, dupLocation) in def.DuplicateTypeDeclarations)
 				ctx.ReportDiagnostic(Diagnostic.Create(DuplicateTypeDeclaration, dupLocation, typeName));
 		}
 
-		bool hasDslValidation = isStrictMode && dslDefs.HasAny;
+		bool hasDslValidation = globalStrict.Severity is not null && dslDefs.HasAny;
 		bool hasClassValidation = classDefs.Length > 0;
 
 		if (!hasDslValidation && !hasClassValidation)
 			return;
 
 		var primaryDef = hasClassValidation ? classDefs[0] : null;
-		int registryStrictMode = primaryDef?.RegistryStrictMode ?? ClassDefinitions.StrictInherit;
+		int registryRaw = primaryDef?.RegistryStrictMode ?? ClassDefinitions.SeverityInherit;
+		bool registryExplicit = registryRaw != ClassDefinitions.SeverityInherit;
+		bool globalExplicit = globalStrict.Severity is not null;
+		bool isExplicitlyEnabled = registryExplicit || globalExplicit;
 
-		// Resolve the effective registry-level strict (registry override → global MSBuild strict).
-		bool effectiveRegistryStrict =
-			registryStrictMode == ClassDefinitions.StrictEnable
-			|| (registryStrictMode == ClassDefinitions.StrictInherit && isStrictMode);
+		DiagnosticSeverity? registrySeverity = registryRaw switch
+		{
+			ClassDefinitions.SeverityOff => null,
+			ClassDefinitions.SeverityInherit => globalStrict.Severity
+				?? (hasClassValidation ? DiagnosticSeverity.Info : null),
+			ClassDefinitions.SeveritySuggestion => DiagnosticSeverity.Info,
+			ClassDefinitions.SeverityWarning => DiagnosticSeverity.Warning,
+			ClassDefinitions.SeverityError => DiagnosticSeverity.Error,
+			_ => null,
+		};
 
-		// Determine whether to validate a type based on its allowed set size and strict overrides.
-		bool ShouldValidate(HashSet<string> allowedSet, int typeStrictMode) =>
-			typeStrictMode != ClassDefinitions.StrictDisable
-			&& (typeStrictMode == ClassDefinitions.StrictEnable || effectiveRegistryStrict || allowedSet.Count > 0);
+		DiagnosticSeverity? ResolveTypeSeverity(int typeRaw) =>
+			typeRaw switch
+			{
+				ClassDefinitions.SeverityOff => null,
+				ClassDefinitions.SeverityInherit => registrySeverity,
+				ClassDefinitions.SeveritySuggestion => DiagnosticSeverity.Info,
+				ClassDefinitions.SeverityWarning => DiagnosticSeverity.Warning,
+				ClassDefinitions.SeverityError => DiagnosticSeverity.Error,
+				_ => registrySeverity,
+			};
 
-		// Build allowed sets from all active definition sources.
+		int CombineRaw(int a, int b) =>
+			a == ClassDefinitions.SeverityOff || b == ClassDefinitions.SeverityOff
+				? ClassDefinitions.SeverityOff
+				: Math.Max(a, b);
+
+		bool ShouldValidate(HashSet<string> allowedSet, DiagnosticSeverity? severity) =>
+			severity is not null && (allowedSet.Count > 0 || isExplicitlyEnabled);
+
 		var allowedTags = BuildAllowedSet(
 			hasDslValidation ? dslDefs.Tags.AsEnumerable() : [],
 			hasClassValidation ? classDefs.SelectMany(static d => d.Tags) : []
@@ -611,45 +693,76 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			hasClassValidation ? classDefs.SelectMany(static d => d.ElementKinds.Concat(d.RelationshipKinds)) : []
 		);
 
-		// Groups are class-based only (LikeC4 specification blocks have no group keyword).
 #pragma warning disable IDE0028
 		var allowedGroups = hasClassValidation
 			? BuildAllowedSet([], classDefs.SelectMany(static d => d.Groups))
 			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		// Normalise declared keys so that "Azure SKU", "Azure_SKU", and "azure sku" all map to
+		// the same normalised form and are matched case-insensitively at the call site.
+		var allowedMetadata = hasClassValidation
+			? BuildAllowedSet(
+				[],
+				classDefs.SelectMany(static d => d.MetadataKeys).Select(NormaliseMetadataKeyForComparison)
+			)
+			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 #pragma warning restore IDE0028
 
-		int tagsTypeStrict = primaryDef?.TagsTypeStrictMode ?? ClassDefinitions.StrictInherit;
-		// For kinds: most permissive (max) of ElementKinds and RelationshipKinds strict modes.
-		int kindsTypeStrict = Math.Max(
-			primaryDef?.ElementKindsTypeStrictMode ?? ClassDefinitions.StrictInherit,
-			primaryDef?.RelationshipKindsTypeStrictMode ?? ClassDefinitions.StrictInherit
+		int tagsTypeRaw = primaryDef?.TagsTypeStrictMode ?? ClassDefinitions.SeverityInherit;
+		int kindsTypeRaw = CombineRaw(
+			primaryDef?.ElementKindsTypeStrictMode ?? ClassDefinitions.SeverityInherit,
+			primaryDef?.RelationshipKindsTypeStrictMode ?? ClassDefinitions.SeverityInherit
 		);
-		int groupsTypeStrict = primaryDef?.GroupsTypeStrictMode ?? ClassDefinitions.StrictInherit;
+		int groupsTypeRaw = primaryDef?.GroupsTypeStrictMode ?? ClassDefinitions.SeverityInherit;
+		int metadataTypeRaw = primaryDef?.MetadataKeysTypeStrictMode ?? ClassDefinitions.SeverityInherit;
 
-		if (ShouldValidate(allowedTags, tagsTypeStrict))
+		var tagsSeverity = ResolveTypeSeverity(tagsTypeRaw);
+		var kindsSeverity = ResolveTypeSeverity(kindsTypeRaw);
+		var groupsSeverity = ResolveTypeSeverity(groupsTypeRaw);
+		var metadataSeverity =
+			metadataTypeRaw != ClassDefinitions.SeverityInherit
+				? ResolveTypeSeverity(metadataTypeRaw)
+				: (globalStrict.IncludesMetadata ? registrySeverity : null);
+
+		if (ShouldValidate(allowedTags, tagsSeverity) && tagsSeverity is { } tagSeverity)
 		{
+			var descriptor = WithSeverity(UndeclaredTag, tagSeverity);
 			foreach (var site in tagCallSites)
 			{
 				if (!allowedTags.Contains(site.Value))
-					ctx.ReportDiagnostic(Diagnostic.Create(UndeclaredTag, site.Location, site.Value));
+					ctx.ReportDiagnostic(Diagnostic.Create(descriptor, site.Location, site.Value));
 			}
 		}
 
-		if (ShouldValidate(allowedKinds, kindsTypeStrict))
+		if (ShouldValidate(allowedKinds, kindsSeverity) && kindsSeverity is { } kindSeverity)
 		{
+			var descriptor = WithSeverity(UndeclaredKind, kindSeverity);
 			foreach (var site in kindCallSites)
 			{
 				if (!allowedKinds.Contains(site.Value))
-					ctx.ReportDiagnostic(Diagnostic.Create(UndeclaredKind, site.Location, site.Value));
+					ctx.ReportDiagnostic(Diagnostic.Create(descriptor, site.Location, site.Value));
 			}
 		}
 
-		if (ShouldValidate(allowedGroups, groupsTypeStrict))
+		if (ShouldValidate(allowedGroups, groupsSeverity) && groupsSeverity is { } groupSeverity)
 		{
+			var descriptor = WithSeverity(UndeclaredGroup, groupSeverity);
 			foreach (var site in groupCallSites)
 			{
 				if (!allowedGroups.Contains(site.Value))
-					ctx.ReportDiagnostic(Diagnostic.Create(UndeclaredGroup, site.Location, site.Value));
+					ctx.ReportDiagnostic(Diagnostic.Create(descriptor, site.Location, site.Value));
+			}
+		}
+
+		if (ShouldValidate(allowedMetadata, metadataSeverity) && metadataSeverity is { } metaSeverity)
+		{
+			var descriptor = WithSeverity(UndeclaredMetadataKey, metaSeverity);
+			foreach (var site in metadataCallSites)
+			{
+				// Normalise the call-site key the same way the registry keys were normalised
+				// so that "Azure SKU", "azure sku", "AZURE_sku" all match "Azure_SKU".
+				var normalised = NormaliseMetadataKeyForComparison(site.Value);
+				if (!allowedMetadata.Contains(normalised))
+					ctx.ReportDiagnostic(Diagnostic.Create(descriptor, site.Location, site.Value));
 			}
 		}
 	}
@@ -664,50 +777,26 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		return set;
 	}
 
-	// --- Runtime initializer generation ---
-
 	/// <summary>
-	/// Emits a <c>[ModuleInitializer]</c> that calls <c>LikeC4RegistryBridge.Register</c>
-	/// with all values from the <see cref="ClassDefinitions"/> so the runtime strict-options
-	/// are populated without reflection.
+	/// Normalises a metadata key for registry comparison by replacing every character that is
+	/// not a letter, digit, hyphen, or underscore with <c>_</c>.  The resulting string is then
+	/// compared case-insensitively, so <c>"Azure SKU"</c>, <c>"azure sku"</c>, <c>"AZURE_sku"</c>,
+	/// and <c>"Azure_SKU"</c> all resolve to the same key.
+	/// Mirrors the runtime logic in <c>ModelBuilder.NormaliseMetadataKey</c>.
 	/// </summary>
-	static void GenerateRegistryInitializer(SourceProductionContext ctx, ClassDefinitions def)
+	internal static string NormaliseMetadataKeyForComparison(string key)
 	{
-		var sb = new StringBuilder();
-		sb.Append("// <auto-generated/>\n");
-		sb.Append("// Generated by AspireC4.SourceGenerators \u2014 do not edit manually.\n");
-		sb.Append("#nullable enable\n");
-		sb.Append("using System.Runtime.CompilerServices;\n");
-		sb.Append('\n');
-		sb.Append("namespace Aspire.Hosting.AspireC4.Generated\n");
-		sb.Append("{\n");
-		sb.Append("    internal static class LikeC4RegistryStrictConfiguration\n");
-		sb.Append("    {\n");
-		sb.Append("        [ModuleInitializer]\n");
-		sb.Append("        internal static void Initialize()\n");
-		sb.Append("        {\n");
-		sb.Append("            global::Aspire.Hosting.AspireC4.LikeC4RegistryBridge.Register(static opts =>\n");
-		sb.Append("            {\n");
+		if (string.IsNullOrEmpty(key))
+			return key;
 
-		foreach (var tag in def.Tags)
-			sb.Append($"                opts.Tags.Add(\"{EscapeString(tag)}\");\n");
+		var chars = key.ToCharArray();
+		for (var i = 0; i < chars.Length; i++)
+		{
+			var c = chars[i];
+			if (!char.IsLetterOrDigit(c) && c != '_' && c != '-')
+				chars[i] = '_';
+		}
 
-		foreach (var rk in def.RelationshipKinds)
-			sb.Append($"                opts.RelationshipKinds.Add(\"{EscapeString(rk)}\");\n");
-
-		foreach (var group in def.Groups)
-			sb.Append($"                opts.Groups.Add(\"{EscapeString(group)}\");\n");
-
-		foreach (var mk in def.MetadataKeys)
-			sb.Append($"                opts.MetadataKeys.Add(\"{EscapeString(mk)}\");\n");
-
-		sb.Append("            });\n");
-		sb.Append("        }\n");
-		sb.Append("    }\n");
-		sb.Append("}\n");
-
-		ctx.AddSource("LikeC4RegistryStrictConfiguration.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+		return new string(chars);
 	}
-
-	static string EscapeString(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
 }

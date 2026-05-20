@@ -22,11 +22,13 @@ sealed class ClassDefinitions(
 ) : IEquatable<ClassDefinitions>
 {
 	/// <summary>
-	/// Strict mode constants: 0 = Inherit (use global MSBuild property), 1 = Enable, 2 = Disable.
+	/// Severity constants: 0 = Inherit, 1 = Off, 2 = Suggestion, 3 = Warning, 4 = Error.
 	/// </summary>
-	public const int StrictInherit = 0;
-	public const int StrictEnable = 1;
-	public const int StrictDisable = 2;
+	public const int SeverityInherit = 0;
+	public const int SeverityOff = 1;
+	public const int SeveritySuggestion = 2;
+	public const int SeverityWarning = 3;
+	public const int SeverityError = 4;
 
 	public static readonly ClassDefinitions Empty = new(
 		string.Empty,
@@ -36,12 +38,12 @@ sealed class ClassDefinitions(
 		ImmutableArray<string>.Empty,
 		ImmutableArray<string>.Empty,
 		ImmutableArray<string>.Empty,
-		StrictInherit,
-		StrictInherit,
-		StrictInherit,
-		StrictInherit,
-		StrictInherit,
-		StrictInherit,
+		SeverityInherit,
+		SeverityInherit,
+		SeverityInherit,
+		SeverityInherit,
+		SeverityInherit,
+		SeverityInherit,
 		ImmutableArray<(string, Location?)>.Empty
 	);
 
@@ -57,12 +59,12 @@ sealed class ClassDefinitions(
 	public ImmutableArray<string> MetadataKeys { get; } = metadataKeys;
 
 	/// <summary>
-	/// Registry-wide strict override from <c>[LikeC4Registry(Strict = LikeC4StrictMode.X)]</c>.
-	/// 0 = Inherit, 1 = Enable, 2 = Disable.
+	/// Registry-wide severity override from <c>[LikeC4Registry(Strict = LikeC4Severity.X)]</c>.
+	/// 0 = Inherit, 1 = Off, 2 = Suggestion, 3 = Warning, 4 = Error.
 	/// </summary>
 	public int RegistryStrictMode { get; } = registryStrictMode;
 
-	/// <summary>Per-type strict overrides from <c>[KnownType(..., Strict = LikeC4StrictMode.X)]</c>.</summary>
+	/// <summary>Per-type severity overrides from <c>[KnownType(..., Strict = LikeC4Severity.X)]</c>.</summary>
 	public int TagsTypeStrictMode { get; } = tagsTypeStrictMode;
 	public int ElementKindsTypeStrictMode { get; } = elementKindsTypeStrictMode;
 	public int RelationshipKindsTypeStrictMode { get; } = relationshipKindsTypeStrictMode;

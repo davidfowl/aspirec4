@@ -64,8 +64,7 @@ sealed partial class AspireC4LifecycleHook
 			);
 		}
 
-		// Fire-and-forget background tasks.
-		_ = KeepServerHiddenAsync(serverResource, cancellationToken);
+		// Fire-and-forget: inject diagram URL into project resources once the server is running.
 		_ = InjectDiagramUrlWhenLikeC4RunsAsync(appModel, serverResource, displayName, cancellationToken);
 	}
 
@@ -177,7 +176,10 @@ sealed partial class AspireC4LifecycleHook
 	/// <summary>
 	/// Watches for state changes on the inner resource and forwards them to the outer
 	/// <see cref="AspireC4Resource"/> so consumers watching the outer resource name
-	/// (e.g., integration tests using <c>ResourceNotifications</c>) receive the correct lifecycle state.
+	/// (e.g., integration tests using <c>ResourceNotifications</c>) receive the correct lifecycle
+	/// state, URLs (e.g. the diagram link), and properties (e.g. port information).
+	/// This makes the outer <see cref="AspireC4Resource"/> the single useful dashboard entry —
+	/// the inner server resource is always kept hidden.
 	/// </summary>
 	async Task ForwardInnerResourceStateAsync(AspireC4Resource outerResource, CancellationToken cancellationToken)
 	{
@@ -194,7 +196,13 @@ sealed partial class AspireC4LifecycleHook
 
 				await resourceNotificationService.PublishUpdateAsync(
 					outerResource,
-					s => s with { State = notification.Snapshot.State }
+					s =>
+						s with
+						{
+							State = notification.Snapshot.State,
+							Urls = notification.Snapshot.Urls,
+							Properties = notification.Snapshot.Properties,
+						}
 				);
 			}
 		}
