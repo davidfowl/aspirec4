@@ -867,7 +867,7 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 	[Test]
 	public async Task RunGenerator_WithMetadataKeysNestedClass_ExtractsWithoutError(CancellationToken cancellationToken)
 	{
-		// Arrange — MetadataKeys is just declared; no call-site validation yet
+		// Arrange
 		var source = BuildSourceWithDefinitionsClass(
 			metadataKeyConstants: [("AzureSku", "Azure SKU"), ("UseCase", "Use Case")],
 			callSites: []
@@ -880,6 +880,152 @@ public sealed class LikeC4StrictValidatorGeneratorTests
 		await Assert
 			.That(result.Diagnostics.Where(d => d.Id.StartsWith("ASPIREC4", StringComparison.Ordinal)))
 			.IsEmpty();
+	}
+
+	[Test]
+	public async Task RunGenerator_WithMetadataCallSite_ExactMatch_EmitsNoDiagnostics(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — registry declares "Azure_SKU"; call site uses the exact same value
+		var source = BuildSourceWithDefinitionsClass(
+			metadataKeyConstants: [("AzureSku", "Azure_SKU")],
+			callSites: [".WithMetadata(\"Azure_SKU\", \"Standard_LRS\")"]
+		);
+
+		// Act — AllIncludingMetadata enables metadata key validation
+		var result = RunGenerator(source, strictMode: "AllIncludingMetadata", cancellationToken: cancellationToken);
+
+		// Assert
+		await Assert.That(result.Diagnostics.Where(static d => d.Id == "ASPIREC4006")).IsEmpty();
+	}
+
+	[Test]
+	public async Task RunGenerator_WithMetadataCallSite_SpaceVariant_EmitsNoDiagnostics(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — registry declares "Azure_SKU"; call site uses "azure sku" (space instead of underscore)
+		var source = BuildSourceWithDefinitionsClass(
+			metadataKeyConstants: [("AzureSku", "Azure_SKU")],
+			callSites: [".WithMetadata(\"azure sku\", \"Standard_LRS\")"]
+		);
+
+		// Act — AllIncludingMetadata enables metadata key validation
+		var result = RunGenerator(source, strictMode: "AllIncludingMetadata", cancellationToken: cancellationToken);
+
+		// Assert — "azure sku" normalises to "azure_sku" which matches "Azure_SKU" case-insensitively
+		await Assert.That(result.Diagnostics.Where(static d => d.Id == "ASPIREC4006")).IsEmpty();
+	}
+
+	[Test]
+	public async Task RunGenerator_WithMetadataCallSite_CaseVariant_EmitsNoDiagnostics(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — registry declares "Azure_SKU"; call site uses "AZURE_sku"
+		var source = BuildSourceWithDefinitionsClass(
+			metadataKeyConstants: [("AzureSku", "Azure_SKU")],
+			callSites: [".WithMetadata(\"AZURE_sku\", \"Standard_LRS\")"]
+		);
+
+		// Act — AllIncludingMetadata enables metadata key validation
+		var result = RunGenerator(source, strictMode: "AllIncludingMetadata", cancellationToken: cancellationToken);
+
+		// Assert — OrdinalIgnoreCase handles the case difference
+		await Assert.That(result.Diagnostics.Where(static d => d.Id == "ASPIREC4006")).IsEmpty();
+	}
+
+	[Test]
+	public async Task RunGenerator_WithMetadataCallSite_RegistryKeyHasSpaces_CallSiteHasUnderscores_EmitsNoDiagnostics(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — registry declares "Azure SKU" (with space); call site uses "Azure_SKU"
+		var source = BuildSourceWithDefinitionsClass(
+			metadataKeyConstants: [("AzureSku", "Azure SKU")],
+			callSites: [".WithMetadata(\"Azure_SKU\", \"Standard_LRS\")"]
+		);
+
+		// Act — AllIncludingMetadata enables metadata key validation
+		var result = RunGenerator(source, strictMode: "AllIncludingMetadata", cancellationToken: cancellationToken);
+
+		// Assert — "Azure SKU" normalises to "Azure_SKU" in the registry set
+		await Assert.That(result.Diagnostics.Where(static d => d.Id == "ASPIREC4006")).IsEmpty();
+	}
+
+	[Test]
+	public async Task RunGenerator_WithMetadataCallSite_UndeclaredKey_EmitsDiagnostic(
+		CancellationToken cancellationToken
+	)
+	{
+		// Arrange — registry declares "Azure_SKU" only; call site uses an unknown key
+		var source = BuildSourceWithDefinitionsClass(
+			metadataKeyConstants: [("AzureSku", "Azure_SKU")],
+			callSites: [".WithMetadata(\"unknown_key\", \"value\")"]
+		);
+
+		// Act — AllIncludingMetadata enables metadata key validation
+		var result = RunGenerator(source, strictMode: "AllIncludingMetadata", cancellationToken: cancellationToken);
+
+		// Assert
+		var aspireDiags = result.Diagnostics.Where(static d => d.Id == "ASPIREC4006").ToList();
+		await Assert.That(aspireDiags.Count).IsEqualTo(1);
+		await Assert.That(aspireDiags[0].GetMessage(CultureInfo.InvariantCulture)).Contains("unknown_key");
+	}
+
+	// -----------------------------------------------------------------------
+	// NormaliseMetadataKeyForComparison — direct unit tests
+	// -----------------------------------------------------------------------
+
+	[Test]
+	public async Task NormaliseMetadataKeyForComparison_SpaceReplacedWithUnderscore()
+	{
+		// Arrange / Act
+		var result = LikeC4StrictValidatorGenerator.NormaliseMetadataKeyForComparison("Azure SKU");
+
+		// Assert
+		await Assert.That(result).IsEqualTo("Azure_SKU");
+	}
+
+	[Test]
+	public async Task NormaliseMetadataKeyForComparison_AlreadyValidKey_Unchanged()
+	{
+		// Arrange / Act
+		var result = LikeC4StrictValidatorGenerator.NormaliseMetadataKeyForComparison("Azure_SKU");
+
+		// Assert
+		await Assert.That(result).IsEqualTo("Azure_SKU");
+	}
+
+	[Test]
+	public async Task NormaliseMetadataKeyForComparison_HyphenPreserved()
+	{
+		// Arrange / Act
+		var result = LikeC4StrictValidatorGenerator.NormaliseMetadataKeyForComparison("azure-sku");
+
+		// Assert
+		await Assert.That(result).IsEqualTo("azure-sku");
+	}
+
+	[Test]
+	public async Task NormaliseMetadataKeyForComparison_MultiplePunctuation_AllReplacedWithUnderscore()
+	{
+		// Arrange / Act
+		var result = LikeC4StrictValidatorGenerator.NormaliseMetadataKeyForComparison("Azure.SKU/Tier");
+
+		// Assert
+		await Assert.That(result).IsEqualTo("Azure_SKU_Tier");
+	}
+
+	[Test]
+	public async Task NormaliseMetadataKeyForComparison_EmptyString_ReturnsEmpty()
+	{
+		// Arrange / Act
+		var result = LikeC4StrictValidatorGenerator.NormaliseMetadataKeyForComparison(string.Empty);
+
+		// Assert
+		await Assert.That(result).IsEqualTo(string.Empty);
 	}
 
 	// -----------------------------------------------------------------------

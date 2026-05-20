@@ -129,6 +129,19 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			+ "in the Groups nested class of a [LikeC4Registry]-annotated class."
 	);
 
+	/// <summary>Emitted when a <c>.WithMetadata()</c> key argument is not declared in the active definitions.</summary>
+	public static readonly DiagnosticDescriptor UndeclaredMetadataKey = new(
+		id: "ASPIREC4006",
+		title: "Undeclared LikeC4 metadata key",
+		messageFormat: "Metadata key '{0}' is not declared. Add it as 'public const string' in the 'MetadataKeys' nested class of your [LikeC4Registry] class.",
+		category: "AspireC4",
+		defaultSeverity: DiagnosticSeverity.Warning,
+		isEnabledByDefault: true,
+		description: "All metadata keys passed to WithMetadata() must be declared as public const string fields "
+			+ "in the MetadataKeys nested class of a [LikeC4Registry]-annotated class. "
+			+ "Keys are compared after normalising whitespace and punctuation to underscores, and are case-insensitive."
+	);
+
 	/// <summary>
 	/// Emitted when a registry type is declared both via a named nested class <em>and</em>
 	/// via individual <c>[KnownType]</c> attributes on constants.
@@ -259,6 +272,7 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		var tagCallSites = CreateCallSiteProvider(context, WithTagMethodName).Collect();
 		var kindCallSites = CreateCallSiteProvider(context, WithKindMethodName).Collect();
 		var groupCallSites = CreateCallSiteProvider(context, WithGroupMethodName).Collect();
+		var metadataCallSites = CreateMetadataCallSiteProvider(context).Collect();
 
 		// Combine everything and validate.
 		context.RegisterSourceOutput(
@@ -268,13 +282,14 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 				.Combine(classDefinitions)
 				.Combine(tagCallSites)
 				.Combine(kindCallSites)
-				.Combine(groupCallSites),
+				.Combine(groupCallSites)
+				.Combine(metadataCallSites),
 			static (ctx, data) =>
 			{
-				var ((((((isDisabled, globalStrict), dslDefs), classDefs), tags), kinds), groups) = data;
+				var (((((((isDisabled, globalStrict), dslDefs), classDefs), tags), kinds), groups), metadata) = data;
 				if (isDisabled)
 					return;
-				Validate(ctx, globalStrict, dslDefs, classDefs, tags, kinds, groups);
+				Validate(ctx, globalStrict, dslDefs, classDefs, tags, kinds, groups, metadata);
 			}
 		);
 	}
@@ -522,6 +537,22 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			.Select(static (v, _) => v!.Value);
 	}
 
+	/// <summary>
+	/// Collects the first argument (key) of every <c>.WithMetadata(key, value)</c> call site.
+	/// </summary>
+	static IncrementalValuesProvider<CallSiteInfo> CreateMetadataCallSiteProvider(
+		IncrementalGeneratorInitializationContext context
+	)
+	{
+		return context
+			.SyntaxProvider.CreateSyntaxProvider(
+				predicate: static (node, _) => IsTargetInvocation(node, "WithMetadata"),
+				transform: static (ctx, ct) => ExtractCallSiteInfo(ctx, ct)
+			)
+			.Where(static v => v.HasValue)
+			.Select(static (v, _) => v!.Value);
+	}
+
 	static bool IsTargetInvocation(SyntaxNode node, string methodName) =>
 		node
 			is InvocationExpressionSyntax
@@ -590,7 +621,8 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		ImmutableArray<ClassDefinitions> classDefs,
 		ImmutableArray<CallSiteInfo> tagCallSites,
 		ImmutableArray<CallSiteInfo> kindCallSites,
-		ImmutableArray<CallSiteInfo> groupCallSites
+		ImmutableArray<CallSiteInfo> groupCallSites,
+		ImmutableArray<CallSiteInfo> metadataCallSites
 	)
 	{
 		if (classDefs.Length > 1)
@@ -668,8 +700,13 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		var allowedGroups = hasClassValidation
 			? BuildAllowedSet([], classDefs.SelectMany(static d => d.Groups))
 			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		// Normalise declared keys so that "Azure SKU", "Azure_SKU", and "azure sku" all map to
+		// the same normalised form and are matched case-insensitively at the call site.
 		var allowedMetadata = hasClassValidation
-			? BuildAllowedSet([], classDefs.SelectMany(static d => d.MetadataKeys))
+			? BuildAllowedSet(
+				[],
+				classDefs.SelectMany(static d => d.MetadataKeys).Select(NormaliseMetadataKeyForComparison)
+			)
 			: new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 #pragma warning restore IDE0028
 
@@ -719,8 +756,18 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 			}
 		}
 
-		_ = metadataSeverity;
-		_ = allowedMetadata;
+		if (ShouldValidate(allowedMetadata, metadataSeverity) && metadataSeverity is { } metaSeverity)
+		{
+			var descriptor = WithSeverity(UndeclaredMetadataKey, metaSeverity);
+			foreach (var site in metadataCallSites)
+			{
+				// Normalise the call-site key the same way the registry keys were normalised
+				// so that "Azure SKU", "azure sku", "AZURE_sku" all match "Azure_SKU".
+				var normalised = NormaliseMetadataKeyForComparison(site.Value);
+				if (!allowedMetadata.Contains(normalised))
+					ctx.ReportDiagnostic(Diagnostic.Create(descriptor, site.Location, site.Value));
+			}
+		}
 	}
 
 	static HashSet<string> BuildAllowedSet(IEnumerable<string> primary, IEnumerable<string> secondary)
@@ -731,5 +778,28 @@ public sealed class LikeC4StrictValidatorGenerator : IIncrementalGenerator
 		foreach (var v in secondary)
 			set.Add(v);
 		return set;
+	}
+
+	/// <summary>
+	/// Normalises a metadata key for registry comparison by replacing every character that is
+	/// not a letter, digit, hyphen, or underscore with <c>_</c>.  The resulting string is then
+	/// compared case-insensitively, so <c>"Azure SKU"</c>, <c>"azure sku"</c>, <c>"AZURE_sku"</c>,
+	/// and <c>"Azure_SKU"</c> all resolve to the same key.
+	/// Mirrors the runtime logic in <c>ModelBuilder.NormaliseMetadataKey</c>.
+	/// </summary>
+	internal static string NormaliseMetadataKeyForComparison(string key)
+	{
+		if (string.IsNullOrEmpty(key))
+			return key;
+
+		var chars = key.ToCharArray();
+		for (var i = 0; i < chars.Length; i++)
+		{
+			var c = chars[i];
+			if (!char.IsLetterOrDigit(c) && c != '_' && c != '-')
+				chars[i] = '_';
+		}
+
+		return new string(chars);
 	}
 }
