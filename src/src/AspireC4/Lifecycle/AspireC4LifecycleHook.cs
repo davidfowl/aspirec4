@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Net.Sockets;
 using Aspire.Hosting.AspireC4.ApplicationModel;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Aspire.Hosting.Eventing;
@@ -18,8 +17,10 @@ sealed partial class AspireC4LifecycleHook(
 	IOptions<AspireC4DiagramOptions> options,
 	IOptions<ContainerWorkspaceOptions> workspaceOptions,
 	ResourceNotificationService resourceNotificationService,
+	ResourceLoggerService resourceLoggerService,
 	IAspireC4LifecycleHookTelemetry telemetry,
-	IConfiguration configuration
+	IConfiguration configuration,
+	TaskCompletionSource<HMRPortMode> hmrPortModeTcs
 ) : IDistributedApplicationEventingSubscriber, IDisposable
 {
 	// Well-known Aspire resource name for the dashboard process.
@@ -44,20 +45,21 @@ sealed partial class AspireC4LifecycleHook(
 
 	// Debounce: cancels any pending delayed write when a new state change arrives.
 	CancellationTokenSource? _debounceCts;
-	CancellationTokenSource? _hmrRelayCts;
-	TcpListener? _hmrRelayListener;
 
 	// The header-stripped body of the last .c4 file written to disk.
 	// Used to skip writes when the generated content has not changed, preventing needless
 	// file-system churn (and git noise) from state-change events.
 	volatile string? _lastRawBody;
 
+	// The resolved or configured exact version of the LikeC4 image (e.g. "1.57.0").
+	// Set either from a pinned ContainerImageTag or by the latest-version check at startup.
+	// When non-null, it is injected as a "Version" metadata property on the AspireC4Resource.
+	volatile string? _resolvedLikeC4Version;
+
 #if NET9_0_OR_GREATER
 	readonly Lock _debounceLock = new();
-	readonly Lock _hmrRelayLock = new();
 #else
 	readonly object _debounceLock = new();
-	readonly object _hmrRelayLock = new();
 #endif
 
 	public Task SubscribeAsync(
@@ -71,6 +73,7 @@ sealed partial class AspireC4LifecycleHook(
 			{
 				var aspirec4Resource = evt.Model.Resources.OfType<AspireC4Resource>().FirstOrDefault();
 				var serverResource = aspirec4Resource?.InnerResource as LikeC4ServerResource;
+				var localServerResource = aspirec4Resource?.InnerResource as LikeC4LocalServerResource;
 
 				if (executionContext.IsPublishMode)
 				{
@@ -79,15 +82,23 @@ sealed partial class AspireC4LifecycleHook(
 					return;
 				}
 
+				if (localServerResource is not null)
+				{
+					await TryResolveLocalCLIVersionAsync(ct);
+				}
+
 				if (serverResource is not null)
 				{
 					SetupContainerBindMount(evt.Model, serverResource);
 
-					if (!options.Value.DisableHMR)
-					{
-						EnsureLegacyHostHmrPortAvailable();
-						StartLegacyHmrRelay(evt.Model, ct);
-					}
+					// Always record the effective tag immediately so the version property is
+					// visible in the dashboard even when using "latest" or when the docker run
+					// version check is disabled. WatchProbeLogsAndCompleteAsync will
+					// overwrite this with the actual resolved version when using "latest".
+					var effectiveTag = options.Value.ContainerImageTag ?? LikeC4ServerResource.DefaultTag;
+					_resolvedLikeC4Version = effectiveTag;
+
+					TryUpdateHmrPortModeFromLatestVersionAsync(evt.Model, ct);
 				}
 
 				await WriteC4FileAsync(evt.Model, ct);
@@ -113,14 +124,35 @@ sealed partial class AspireC4LifecycleHook(
 
 				// Fire-and-forget: watch for resource state changes and regenerate the file.
 				// The ct is the application lifetime token; it is cancelled on shutdown.
-				_ = WatchResourceStatesAsync(evt.Model, ct);
+				_ = WatchResourceStatesAsync(
+					evt.Model,
+					options.Value.ExcludedResourceTypes.Count > 0 ? options.Value.ExcludedResourceTypes : null,
+					ct
+				);
 
 				// Forward inner resource state, URLs, and properties to AspireC4Resource so
 				// it is the single useful dashboard entry and consumers watching by the outer
 				// resource name (e.g., integration tests) receive correct state updates.
+				// Also forward console logs so they are visible on the outer resource's
+				// Console tab in the dashboard.
 				if (aspirec4Resource is not null)
 				{
+					// Immediately surface the resolved version on the outer resource so the
+					// dashboard shows it before the inner container emits its first state notification.
+					if (_resolvedLikeC4Version is { } resolvedVersion)
+					{
+						await resourceNotificationService.PublishUpdateAsync(
+							aspirec4Resource,
+							s =>
+								s with
+								{
+									Properties = [new ResourcePropertySnapshot("LikeC4 Version", resolvedVersion)],
+								}
+						);
+					}
+
 					_ = ForwardInnerResourceStateAsync(aspirec4Resource, ct);
+					_ = ForwardInnerResourceLogsAsync(aspirec4Resource, ct);
 				}
 
 				if (options.Value.IncludeAspireDashboardLinks)

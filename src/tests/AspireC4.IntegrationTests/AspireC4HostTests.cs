@@ -13,7 +13,7 @@ namespace Aspire.Hosting.AspireC4;
 /// A single app instance is shared across all tests in this class (started in <see cref="ClassSetUpAsync"/>
 /// and torn down in <see cref="ClassTearDownAsync"/>) to avoid the resource contention that occurs when
 /// 10+ Aspire apps (each with postgres/redis/docker containers) start in parallel.
-/// HMR is disabled so no relay port is bound during testing.
+/// HMR is disabled during testing to avoid port binding on the CI host.
 /// </summary>
 public sealed partial class AspireC4HostTests
 {
@@ -66,20 +66,15 @@ public sealed partial class AspireC4HostTests
 				["AspireC4:OutputDirectory"] = s_outputDir,
 				["AspireC4:FileName"] = "model.gen",
 				["AspireC4:Title"] = "Integration Test Architecture",
-				// Disable HMR so no relay port is bound during testing.
+				// Disable HMR to avoid binding port 24678 during testing.
 				["AspireC4:DisableHMR"] = "true",
 			}
 		);
 
-		// PostConfigure wins over all Configure callbacks, including the TestAppHost's
-		// configure callback that sets ValidateBeforeStart=true and the default FormatGeneratedFile=true.
-		// Both invoke `npx likec4 …` which traverses up the directory tree and scans the entire
+		// PostConfigure wins over all Configure callbacks, including the default FormatGeneratedFile=true.
+		// The format step invokes `npx likec4 …` which traverses up the directory tree and scans the entire
 		// repository workspace when run from within the repo — hanging the BeforeStartEvent handler.
-		appBuilder.Services.PostConfigure<AspireC4DiagramOptions>(static opts =>
-		{
-			opts.ValidateBeforeStart = false;
-			opts.FormatGeneratedFile = false;
-		});
+		appBuilder.Services.PostConfigure<AspireC4DiagramOptions>(static opts => opts.FormatGeneratedFile = false);
 
 		s_app = await appBuilder.BuildAsync(cancellationToken);
 		await s_app.StartAsync(cancellationToken);

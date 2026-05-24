@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using Aspire.Hosting.AspireC4.ApplicationModel;
+using Aspire.Hosting.AspireC4.LikeC4.Annotations;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 namespace Aspire.Hosting;
 
@@ -43,9 +46,38 @@ public static class AspireC4ResourceExtensions
 		if (aspirec4.InnerResource is not null)
 			builder.ApplicationBuilder.Resources.Remove(aspirec4.InnerResource);
 
+		// The container server's WithHttpHealthCheck already registered a service-level health check.
+		// Removing the resource from the collection above does not un-register the DI service entry,
+		// so we must clean it up here to prevent a duplicate-name error when the local resource adds
+		// its own identically-named health check.
+		var containerHcName =
+			$"{aspirec4.Name}{AspireC4DistributedApplicationBuilderExtensions.AspireC4ServerResourceSuffix}_{LikeC4LocalServerResource.HttpEndpointName}_/_200_check";
+		builder.ApplicationBuilder.Services.PostConfigure<HealthCheckServiceOptions>(opts =>
+		{
+			var stale = opts.Registrations.FirstOrDefault(r =>
+				string.Equals(r.Name, containerHcName, StringComparison.OrdinalIgnoreCase)
+			);
+			if (stale is not null)
+				opts.Registrations.Remove(stale);
+		});
+
+		// Remove the version probe container (registered when using "latest" with version checking).
+		// It is only needed for the container server's HMR port detection; local CLI uses a fixed port.
+		if (aspirec4.VersionProbeResource is not null)
+		{
+			builder.ApplicationBuilder.Resources.Remove(aspirec4.VersionProbeResource);
+			aspirec4.VersionProbeResource = null;
+		}
+
+		// Pre-complete the TCS so the (now-removed) container WithArgs never stalls.
+		// Local CLI mode always uses fixed HMR port — no version detection is needed.
+		aspirec4.HMRPortModeTcs.TrySetResult(HMRPortMode.FixedPort);
+
 		var resolvedRuntime = runtime == LocalCLIRuntime.Auto ? AspireC4Builder.DetectRuntime() : runtime;
 
-		var (command, args) = AspireC4Builder.BuildLocalCLICommand(
+		// Build the base args without the HMR port — the async WithArgs callback below appends
+		// --hmr-port at startup time once IOptions<AspireC4DiagramOptions> is resolvable.
+		var (command, baseArgs) = AspireC4Builder.BuildLocalCLICommand(
 			resolvedRuntime,
 			aspirec4.OutputDirectory,
 			LikeC4LocalServerResource.DefaultPort
@@ -65,19 +97,45 @@ public static class AspireC4ResourceExtensions
 
 		var localBuilder = builder
 			.ApplicationBuilder.AddResource(localResource)
-			.WithArgs(args)
+			.WithArgs(context =>
+			{
+				var diagOpts = context.ExecutionContext.ServiceProvider.GetRequiredService<
+					IOptions<AspireC4DiagramOptions>
+				>();
+
+				foreach (var arg in baseArgs)
+					context.Args.Add(arg);
+
+				if (!diagOpts.Value.DisableHMR)
+				{
+					var hmrPort = diagOpts.Value.HMRPort ?? LikeC4LocalServerResource.DefaultHMRPort;
+					context.Args.Add("--hmr-port");
+					context.Args.Add($"{hmrPort}");
+				}
+
+				return Task.CompletedTask;
+			})
 			.WithHttpEndpoint(
 				name: LikeC4LocalServerResource.HttpEndpointName,
 				targetPort: LikeC4LocalServerResource.DefaultPort
 			)
-			.WithExternalHttpEndpoints()
+			.WithHttpEndpoint(
+				name: LikeC4LocalServerResource.HMREndpointName,
+				targetPort: LikeC4LocalServerResource.DefaultHMRPort
+			)
+			.WithHttpHealthCheck("/", statusCode: 200, endpointName: LikeC4LocalServerResource.HttpEndpointName)
+			//.WithExternalHttpEndpoints()
+			// Exclude from the diagram and manifest. Set a stable DSL identifier so that,
+			// if a consumer explicitly includes this resource (e.g. via ConfigureTestHost),
+			// it is emitted as "aspirec4" — the same name as the Docker-container variant.
 			.ExcludeFromLikeC4()
+			.WithAnnotation(new LikeC4DslIdAnnotation(aspirec4.Name))
 			.ExcludeFromManifest()
 			.WithInitialState(
 				new CustomResourceSnapshot
 				{
 					ResourceType = nameof(LikeC4LocalServerResource),
-					IsHidden = true,
+					IsHidden = false,
 					Properties = [],
 				}
 			);

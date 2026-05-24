@@ -47,6 +47,11 @@ static class ModelBuilder
 	/// <see cref="EndpointAnnotation.AllocatedEndpoint"/> directly, ensuring
 	/// the correct public port is used (the same source the Aspire dashboard uses).
 	/// </param>
+	/// <param name="excludedResourceTypes">
+	/// Optional set of resource types to exclude from the model. A resource is excluded when its runtime type is
+	/// the same as, or a subclass of, any type in this set. When <see langword="null"/>, no type-based exclusion
+	/// is applied. See <see cref="AspireC4DiagramOptions.ExcludedResourceTypes"/> for the configured default.
+	/// </param>
 	[System.Diagnostics.CodeAnalysis.SuppressMessage(
 		"Design",
 		"CA1054:URI-like parameters should not be strings",
@@ -63,12 +68,13 @@ static class ModelBuilder
 		string? dashboardBaseUrl = null,
 		string? dashboardBrowserToken = null,
 		IReadOnlyDictionary<string, string?>? stateTagMap = null,
-		IReadOnlyDictionary<string, IReadOnlyList<(string Url, string Name)>>? resourceSnapshotUrls = null
+		IReadOnlyDictionary<string, IReadOnlyList<(string Url, string Name)>>? resourceSnapshotUrls = null,
+		IReadOnlySet<Type>? excludedResourceTypes = null
 	)
 	{
 		ArgumentNullException.ThrowIfNull(resources);
 
-		var visibleResources = BuildVisibleSet(resources);
+		var visibleResources = BuildVisibleSet(resources, excludedResourceTypes);
 
 		// Build a name → resource lookup so we can resolve "surrogate" resources.
 		// When an Azure resource (e.g. AzureRedisCacheResource) is replaced by a local
@@ -89,6 +95,16 @@ static class ModelBuilder
 			.GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
 			.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
+		// Build a name → DSL-identifier map. A LikeC4DslIdAnnotation lets any resource emit
+		// under a different identifier than its Aspire resource name (used, for example, to
+		// normalise the AspireC4 sidecar to "aspirec4" regardless of whether the Docker
+		// container or the local-CLI executable is active).
+		Dictionary<string, string> dslIdByName = visibleResources.ToDictionary(
+			r => r.Name,
+			r => r.Annotations.OfType<LikeC4DslIdAnnotation>().LastOrDefault()?.DslId ?? r.Name,
+			StringComparer.OrdinalIgnoreCase
+		);
+
 #pragma warning disable IDE0028 // Simplify collection initialization
 		List<LikeC4Element> elements = new(visibleResources.Count);
 #pragma warning restore IDE0028 // Simplify collection initialization
@@ -102,6 +118,7 @@ static class ModelBuilder
 			elements.Add(
 				BuildElement(
 					resource,
+					dslIdByName[resource.Name],
 					state,
 					autoIconsEnabled,
 					aspireMetadataInclusion,
@@ -119,6 +136,7 @@ static class ModelBuilder
 				resource,
 				visibleResources,
 				visibleByName,
+				dslIdByName,
 				relationships,
 				visitedRelationships,
 				normaliseMetadataBehaviour
@@ -133,14 +151,22 @@ static class ModelBuilder
 	/// (i.e. not excluded or hidden). Useful for filtering state-change notifications
 	/// to only relevant resources.
 	/// </summary>
-	public static IReadOnlySet<string> GetVisibleResourceNames(IReadOnlyList<IResource> resources)
+	public static IReadOnlySet<string> GetVisibleResourceNames(
+		IReadOnlyList<IResource> resources,
+		IReadOnlySet<Type>? excludedResourceTypes = null
+	)
 	{
 		ArgumentNullException.ThrowIfNull(resources);
 
-		return BuildVisibleSet(resources).Select(r => r.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+		return BuildVisibleSet(resources, excludedResourceTypes)
+			.Select(r => r.Name)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
 	}
 
-	static HashSet<IResource> BuildVisibleSet(IReadOnlyList<IResource> resources)
+	static HashSet<IResource> BuildVisibleSet(
+		IReadOnlyList<IResource> resources,
+		IReadOnlySet<Type>? excludedResourceTypes
+	)
 	{
 #pragma warning disable IDE0028 // Simplify collection initialization
 		HashSet<IResource> visible = new(resources.Count);
@@ -148,7 +174,7 @@ static class ModelBuilder
 
 		foreach (var resource in resources)
 		{
-			if (ShouldExclude(resource))
+			if (ShouldExclude(resource, excludedResourceTypes))
 			{
 				continue;
 			}
@@ -159,9 +185,9 @@ static class ModelBuilder
 		return visible;
 	}
 
-	static bool ShouldExclude(IResource resource)
+	static bool ShouldExclude(IResource resource, IReadOnlySet<Type>? excludedResourceTypes)
 	{
-		// Explicitly excluded by the user.
+		// Explicitly excluded by the user via annotation.
 		if (resource.Annotations.OfType<ExcludeFromLikeC4Annotation>().Any())
 		{
 			return true;
@@ -169,11 +195,31 @@ static class ModelBuilder
 
 		// Hidden resources (e.g. internal Aspire infrastructure) should not appear.
 		var snapshot = resource.Annotations.OfType<ResourceSnapshotAnnotation>().FirstOrDefault();
-		return snapshot?.InitialSnapshot.IsHidden == true;
+		if (snapshot?.InitialSnapshot.IsHidden == true)
+		{
+			return true;
+		}
+
+		// Type-based exclusion: excluded when the resource is an instance of any excluded type
+		// (exact match or subclass). Defaults include ParameterResource to suppress secrets.
+		if (excludedResourceTypes is { Count: > 0 })
+		{
+			var resourceType = resource.GetType();
+			foreach (var excludedType in excludedResourceTypes)
+			{
+				if (resourceType.IsAssignableTo(excludedType))
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	static LikeC4Element BuildElement(
 		IResource resource,
+		string dslId,
 		string? state,
 		bool autoIconsEnabled,
 		AspireMetadataInclusion aspireMetadataInclusion = AspireMetadataInclusion.All,
@@ -194,7 +240,9 @@ static class ModelBuilder
 		var technology = details?.Technology ?? inferredTechnology;
 		var icon = ResolveIcon(resource, details, inferredTechnology, autoIconsEnabled, hiddenOriginal, iconResolvers);
 		var kind = details?.Kind ?? InferKind(resource);
-		var parentName = (resource as IResourceWithParent)?.Parent?.Name;
+		var parentName = resource is IResourceWithParent { Parent: { } parent }
+			? (parent.Annotations.OfType<LikeC4DslIdAnnotation>().LastOrDefault()?.DslId ?? parent.Name)
+			: null;
 		var group = resource.Annotations.OfType<LikeC4GroupAnnotation>().LastOrDefault()?.GroupName;
 
 		var userMetadata = NormaliseMetadataKeys(details?.Metadata ?? [], normaliseMetadataBehaviour);
@@ -227,7 +275,7 @@ static class ModelBuilder
 
 		return new()
 		{
-			Name = resource.Name,
+			Name = dslId,
 			Label = label,
 			Kind = kind,
 			Technology = technology,
@@ -516,11 +564,13 @@ static class ModelBuilder
 		IResource resource,
 		HashSet<IResource> visibleResources,
 		Dictionary<string, IResource> visibleByName,
+		Dictionary<string, string> dslIdByName,
 		List<LikeC4Relationship> relationships,
 		HashSet<(string, string)> visited,
 		NormaliseMetadataBehaviour normaliseMetadataBehaviour
 	)
 	{
+		var sourceDslId = dslIdByName.GetValueOrDefault(resource.Name, resource.Name);
 		foreach (var annotation in resource.Annotations.OfType<ResourceRelationshipAnnotation>())
 		{
 			// Skip infrastructure-only wait-for dependencies.
@@ -543,7 +593,7 @@ static class ModelBuilder
 				continue;
 			}
 
-			var key = (resource.Name, effectiveTarget.Name);
+			var key = (sourceDslId, dslIdByName.GetValueOrDefault(effectiveTarget.Name, effectiveTarget.Name));
 			if (!visited.Add(key))
 			{
 				continue;
@@ -571,8 +621,8 @@ static class ModelBuilder
 			relationships.Add(
 				new LikeC4Relationship
 				{
-					SourceName = resource.Name,
-					TargetName = effectiveTarget.Name,
+					SourceName = sourceDslId,
+					TargetName = dslIdByName.GetValueOrDefault(effectiveTarget.Name, effectiveTarget.Name),
 					Label = details?.Label ?? inferredLabel,
 					Technology = details?.Technology,
 					Description = details?.Description,
@@ -596,8 +646,9 @@ static class ModelBuilder
 				continue;
 			}
 
-			var key = (resource.Name, effectiveTarget.Name);
-			if (!visited.Add(key))
+			var targetDslId = dslIdByName.GetValueOrDefault(effectiveTarget.Name, effectiveTarget.Name);
+			var key2 = (sourceDslId, targetDslId);
+			if (!visited.Add(key2))
 			{
 				continue;
 			}
@@ -607,8 +658,8 @@ static class ModelBuilder
 			relationships.Add(
 				new LikeC4Relationship
 				{
-					SourceName = resource.Name,
-					TargetName = effectiveTarget.Name,
+					SourceName = sourceDslId,
+					TargetName = targetDslId,
 					Label = details.Label,
 					Technology = details.Technology,
 					Description = details.Description,

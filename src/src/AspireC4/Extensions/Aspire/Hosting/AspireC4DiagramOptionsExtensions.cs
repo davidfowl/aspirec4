@@ -145,15 +145,6 @@ public static class AspireC4DiagramOptionsExtensions
 			return options;
 		}
 
-		/// <summary>Enables or disables LikeC4 validation before startup.</summary>
-		/// <seealso cref="AspireC4DiagramOptions.ValidateBeforeStart"/>
-		public AspireC4DiagramOptions WithValidateBeforeStart(bool validate = true)
-		{
-			ArgumentNullException.ThrowIfNull(options);
-			options.ValidateBeforeStart = validate;
-			return options;
-		}
-
 		/// <summary>Adds a custom element kind specification to the <c>specification { }</c> block.</summary>
 		/// <seealso cref="AspireC4DiagramOptions.ElementKindSpecs"/>
 		public AspireC4DiagramOptions WithElementKindSpec(LikeC4ElementKindSpec spec)
@@ -274,6 +265,57 @@ public static class AspireC4DiagramOptionsExtensions
 			ArgumentNullException.ThrowIfNull(options);
 			ArgumentNullException.ThrowIfNull(resolver);
 			options.IconResolvers.Add(resolver);
+			return options;
+		}
+
+		/// <summary>
+		/// Adds <typeparamref name="T"/> (and any subclass) to the set of resource types that are
+		/// automatically excluded from the generated LikeC4 diagram.
+		/// </summary>
+		/// <typeparam name="T">
+		/// The resource type to exclude. Any resource whose runtime type is <typeparamref name="T"/>
+		/// or a subclass of <typeparamref name="T"/> will be omitted from the diagram.
+		/// </typeparam>
+		/// <returns>The same <see cref="AspireC4DiagramOptions"/> for further configuration.</returns>
+		/// <seealso cref="AspireC4DiagramOptions.ExcludedResourceTypes"/>
+		public AspireC4DiagramOptions WithExcludedResourceType<T>()
+			where T : IResource
+		{
+			ArgumentNullException.ThrowIfNull(options);
+			options.ExcludedResourceTypes.Add(typeof(T));
+			return options;
+		}
+
+		/// <summary>
+		/// Removes <typeparamref name="T"/> from the set of resource types that are automatically
+		/// excluded from the generated LikeC4 diagram, allowing resources of that type to appear.
+		/// </summary>
+		/// <typeparam name="T">The resource type to re-include in the diagram.</typeparam>
+		/// <returns>The same <see cref="AspireC4DiagramOptions"/> for further configuration.</returns>
+		/// <seealso cref="AspireC4DiagramOptions.ExcludedResourceTypes"/>
+		public AspireC4DiagramOptions WithoutExcludedResourceType<T>()
+			where T : IResource
+		{
+			ArgumentNullException.ThrowIfNull(options);
+			options.ExcludedResourceTypes.Remove(typeof(T));
+			return options;
+		}
+
+		/// <summary>
+		/// Enables or disables the startup version check that runs when the <c>"latest"</c>
+		/// container image tag is in use.
+		/// </summary>
+		/// <param name="check">
+		/// <see langword="true"/> (default) to run <c>likec4 --version</c> in a throwaway
+		/// container at startup and use the resolved version to configure version-gated features;
+		/// <see langword="false"/> to skip the check for faster startup.
+		/// </param>
+		/// <returns>The same <see cref="AspireC4DiagramOptions"/> for further configuration.</returns>
+		/// <seealso cref="AspireC4DiagramOptions.CheckLatestImageVersion"/>
+		public AspireC4DiagramOptions WithCheckLatestImageVersion(bool check = true)
+		{
+			ArgumentNullException.ThrowIfNull(options);
+			options.CheckLatestImageVersion = check;
 			return options;
 		}
 	}

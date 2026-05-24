@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Aspire.Hosting.AspireC4.ApplicationModel;
 using Aspire.Hosting.AspireC4.Lifecycle;
+using Aspire.Hosting.AspireC4.LikeC4.Annotations;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Aspire.Hosting.Lifecycle;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,19 +67,38 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 		Directory.CreateDirectory(outputDir);
 		var imageTag = diagramOpts.ContainerImageTag ?? LikeC4ServerResource.DefaultTag;
 		var hmrPortMode = HMRPortCompatibility.Resolve(imageTag);
-		// Use the relay on Windows even in Configurable mode: Docker Desktop may fail to publish
-		// the well-known port (24678) reliably due to Hyper-V port reservations or port-cleanup
-		// races between container restarts. The relay owns port 24678 on the host side and
-		// bridges incoming HMR connections to whatever dynamic port Docker happened to allocate.
-		var useHmrRelay = hmrPortMode == HMRPortMode.FixedPort || OperatingSystem.IsWindows();
+		var resolvedHmrPort = diagramOpts.HMRPort ?? LikeC4ServerResource.DefaultContainerHMRPort;
 		var defaultViewId = string.IsNullOrWhiteSpace(diagramOpts.DefaultViewId) ? null : diagramOpts.DefaultViewId;
+
+		// Only create a version probe when using "latest" with version checking enabled.
+		// A pinned tag always has a known HMR mode; "latest" requires a probe to discover it.
+		var needsVersionProbe =
+			string.Equals(imageTag, LikeC4ServerResource.DefaultTag, StringComparison.OrdinalIgnoreCase)
+			&& diagramOpts.CheckLatestImageVersion;
+
+		// Pre-complete the TCS when no probe is needed so WithArgs can proceed without waiting.
+		var hmrPortModeTcs = new TaskCompletionSource<HMRPortMode>(TaskCreationOptions.RunContinuationsAsynchronously);
+		if (!needsVersionProbe)
+			hmrPortModeTcs.TrySetResult(hmrPortMode);
+
+		builder.Services.AddSingleton(hmrPortModeTcs);
+
+		// Always use the same port on both the host and inside the container for HMR.
+		// In LikeC4 v1.57+, --hmr-port sets server.hmr.port — the port Vite BINDS to inside
+		// the container. Vite also advertises this same port to browsers as the HMR WebSocket
+		// target (no separate clientPort option exists). Docker must therefore map the SAME port
+		// on the host so the browser's connection to host:PORT reaches container:PORT correctly.
+		// Dynamic (null) host ports cannot work here: if Docker maps host:DYNAMIC → container:24678
+		// but Vite is told --hmr-port DYNAMIC it binds to container:DYNAMIC, which Docker doesn't
+		// forward, breaking the HMR WebSocket connection entirely.
+		int? hmrHostPort = diagramOpts.HMRPort ?? resolvedHmrPort;
 
 		builder
 			.Services.AddOptions<ContainerWorkspaceOptions>()
 			.Configure(runtime =>
 			{
 				runtime.HMRPortMode = hmrPortMode;
-				runtime.UseHMRRelay = useHmrRelay;
+				runtime.ResolvedHMRPort = resolvedHmrPort;
 			});
 
 		builder.Services.AddEventingSubscriber<AspireC4LifecycleHook>();
@@ -101,6 +121,7 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 			.WithImage(LikeC4ServerResource.DefaultImage)
 			.WithImageTag(imageTag)
 			.WithImageRegistry(LikeC4ServerResource.DefaultRegistry)
+			.WithImagePullPolicy(ImagePullPolicy.Always)
 			.WithHttpEndpoint(
 				port: port,
 				targetPort: LikeC4ServerResource.DefaultContainerServePort,
@@ -116,6 +137,7 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 					opts.Url = defaultViewId != null ? $"/view/{defaultViewId}" : "/";
 				}
 			)
+			.WithHttpHealthCheck("/", statusCode: 200, endpointName: LikeC4LocalServerResource.HttpEndpointName)
 			// Register container args as a callback so they are evaluated at container-start
 			// time (after BeforeStartEvent has set ContainerServePath). DisableHMR is read
 			// from AspireC4DiagramOptions so it respects configuration overrides at runtime.
@@ -126,6 +148,9 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 				>();
 				var diagOpts = context.ExecutionContext.ServiceProvider.GetRequiredService<
 					IOptions<AspireC4DiagramOptions>
+				>();
+				var hmrTcs = context.ExecutionContext.ServiceProvider.GetRequiredService<
+					TaskCompletionSource<HMRPortMode>
 				>();
 
 				context.Args.Add("start");
@@ -143,29 +168,34 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 					context.Args.Add("--use-dot");
 
 				context.Args.Add("--port");
-				context.Args.Add($"{LikeC4ServerResource.DefaultContainerServePort}");
+				context.Args.Add(LikeC4ServerResource.DefaultContainerServePort);
+
+				var hmrMode = await hmrTcs.Task.WaitAsync(context.CancellationToken);
+				if (!diagOpts.Value.DisableHMR && hmrMode == HMRPortMode.Configurable)
+				{
+					// Pass the container-internal HMR port. Because host and container use the
+					// same port (symmetric mapping), this value is also what the browser connects to.
+					context.Args.Add("--hmr-port");
+					context.Args.Add(wsOpts.Value.ResolvedHMRPort);
+				}
+
 				if (diagOpts.Value.DisableHMR)
 					context.Args.Add("--no-react-hmr");
 			})
 			// Exclude the sidecar from the architecture diagram — it is tooling, not a system element.
+			// Set a stable DSL identifier equal to the base name so that the element, when explicitly
+			// included by a consumer (e.g. via ConfigureTestHost), is always emitted as "aspirec4"
+			// regardless of the "-server" suffix on the Aspire resource name.
 			.ExcludeFromLikeC4()
+			.WithAnnotation(new LikeC4DslIdAnnotation(name))
 			.ExcludeFromManifest();
-		//			.WithInitialState(new CustomResourceSnapshot
-		//			{
-		//				ResourceType = nameof(LikeC4ServerResource),
-		////				IsHidden = true,
-		//				Properties = []
-		//			});
 
 		if (!diagramOpts.DisableHMR)
 		{
 			serverBuilder
 				.WithHttpEndpoint(
-					// When using the relay, omit a fixed host port so Docker allocates a dynamic one.
-					// The relay owns port 24678 on the host and bridges connections to the dynamic port.
-					// Direct fixed-port mapping is only safe on non-Windows Configurable-mode images.
-					port: useHmrRelay ? null : LikeC4ServerResource.DefaultContainerUpdatePort,
-					targetPort: LikeC4ServerResource.DefaultContainerUpdatePort,
+					port: hmrHostPort,
+					targetPort: resolvedHmrPort,
 					name: LikeC4ServerResource.HMREndpointName
 				)
 				.WithUrlForEndpoint(
@@ -189,7 +219,36 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 			}
 		}
 
-		AspireC4Resource aspirec4Resource = new(name, outputDir) { InnerResource = serverResource };
+		AspireC4Resource aspirec4Resource = new(name, outputDir)
+		{
+			InnerResource = serverResource,
+			HMRPortModeTcs = hmrPortModeTcs,
+		};
+
+		if (needsVersionProbe)
+		{
+			LikeC4VersionProbeResource probeResource = new(name + "-version-probe");
+			var probeBuilder = builder
+				.AddResource(probeResource)
+				.WithImage(LikeC4ServerResource.DefaultImage)
+				.WithImageTag(imageTag)
+				.WithImageRegistry(LikeC4ServerResource.DefaultRegistry)
+				.WithImagePullPolicy(ImagePullPolicy.Always)
+				.WithArgs("--version")
+				.ExcludeFromLikeC4()
+				.ExcludeFromManifest()
+				.WithInitialState(
+					new CustomResourceSnapshot
+					{
+						ResourceType = "Container",
+						IsHidden = true,
+						Properties = [],
+					}
+				);
+
+			serverBuilder.WaitForCompletion(probeBuilder);
+			aspirec4Resource.VersionProbeResource = probeResource;
+		}
 
 		return builder
 			.AddResource(aspirec4Resource)

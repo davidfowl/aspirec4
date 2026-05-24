@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.AspireC4.LikeC4;
 using Aspire.Hosting.AspireC4.LikeC4.Models;
 
@@ -68,14 +69,39 @@ public sealed class AspireC4DiagramOptions
 	public bool DisableHMR { get; set; }
 
 	/// <summary>
+	/// Specifies the HMR port to use when the LikeC4 server supports configurable HMR ports (LikeC4 v1.57+). This is ignored in older versions, which always use the fixed port 24678.
+	/// When set to <see langword="null"/> (default), the port is dynamically allocated by the server. Set this to a specific port number to use a fixed port instead, which may be necessary in certain environments (e.g. when using a firewall that blocks dynamic ports).
+	/// </summary>
+	/// <remarks>This is ignored if <see cref="DisableHMR"/> is <see langword="true"/>.</remarks>
+	public int? HMRPort { get; set; }
+
+	/// <summary>
 	/// The tag of the <c>ghcr.io/likec4/likec4</c> container image to use for the live server.
 	/// Defaults to <c>null</c>, which resolves to <c>"latest"</c>.
-	/// Set this to a specific version (e.g. <c>"1.56"</c>) to pin the LikeC4 server version.
+	/// Set this to a specific version (e.g. <c>"1.57"</c>) to pin the LikeC4 server version.
 	/// </summary>
 	/// <remarks>
 	/// Ignored when <see cref="AspireC4ResourceExtensions.WithLocalCLI"/> is used.
 	/// </remarks>
 	public string? ContainerImageTag { get; set; }
+
+	/// <summary>
+	/// When <see langword="true"/> (default) and the container image tag resolves to
+	/// <c>"latest"</c>, AspireC4 runs a throwaway container at startup to call
+	/// <c>likec4 --version</c> and detect the actual version pulled by Docker.
+	/// The resolved version is then used to configure version-gated container features
+	/// (such as configurable HMR port mode) correctly even when a specific tag is not pinned.
+	/// <para>
+	/// Set to <see langword="false"/> to skip the check for faster startup, at the cost of
+	/// potentially misconfiguring features that depend on knowing the exact version.
+	/// The default may change to <see langword="false"/> in a future release once
+	/// <c>latest</c> consistently refers to a version that supports all configurable features.
+	/// </para>
+	/// </summary>
+	/// <remarks>
+	/// Has no effect when <see cref="ContainerImageTag"/> is set to a specific version tag.
+	/// </remarks>
+	public bool CheckLatestImageVersion { get; set; } = true;
 
 	/// <summary>
 	/// Enables automatic icon inference for known resource types and technologies.
@@ -117,19 +143,11 @@ public sealed class AspireC4DiagramOptions
 	public bool FormatGeneratedFile { get; set; } = true;
 
 	/// <summary>
-	/// When <see langword="true"/>, runs <c>npx likec4 validate --json --no-layout</c> against the output
-	/// directory after generating the <c>.c4</c> file. Any validation errors are logged as warnings;
-	/// the application continues to start regardless of the result.
-	/// Defaults to <see langword="false"/>.
-	/// </summary>
-	public bool ValidateBeforeStart { get; set; }
-
-	/// <summary>
-	/// Maximum number of seconds to wait for an external process (<c>npx likec4 format</c> or
-	/// <c>docker run … validate</c>) to complete before killing it and moving on.
-	/// This caps how long <see cref="FormatGeneratedFile"/> and <see cref="ValidateBeforeStart"/>
-	/// can block application startup — the process is killed when the timeout elapses, and the
-	/// existing best-effort error handling continues normally.
+	/// Maximum number of seconds to wait for an external process (<c>npx likec4 format</c>)
+	/// to complete before killing it and moving on.
+	/// This caps how long <see cref="FormatGeneratedFile"/> can block application startup —
+	/// the process is killed when the timeout elapses, and the existing best-effort error
+	/// handling continues normally.
 	/// Defaults to <c>30</c> seconds.
 	/// </summary>
 	public int ExternalProcessTimeoutSeconds { get; set; } = 30;
@@ -290,6 +308,26 @@ public sealed class AspireC4DiagramOptions
 	/// Defaults to <see langword="true"/>.
 	/// </summary>
 	public bool IncludeDefaultStateStyles { get; set; } = true;
+
+	/// <summary>
+	/// Resource types that are automatically excluded from the generated LikeC4 diagram.
+	/// Exclusion is based on the runtime type of each Aspire resource: a resource is excluded
+	/// when its type is the same as, or a subclass of, any type in this set.
+	/// <para>
+	/// Defaults to <c>{ typeof(<see cref="ParameterResource"/>) }</c>, which suppresses password
+	/// and secret parameters added via <c>.AddParameter()</c> or <c>.WithParameter()</c>.
+	/// </para>
+	/// <para>
+	/// Use <c>opts.WithExcludedResourceType&lt;T&gt;()</c> to add a type and
+	/// <c>opts.WithoutExcludedResourceType&lt;T&gt;()</c> to remove one (including the default).
+	/// </para>
+	/// </summary>
+	[System.Diagnostics.CodeAnalysis.SuppressMessage(
+		"Usage",
+		"CA2227:Collection properties should be read only",
+		Justification = "Settable for configuration binding and direct assignment in user code"
+	)]
+	public HashSet<Type> ExcludedResourceTypes { get; set; } = [typeof(ParameterResource)];
 
 	/// <summary>
 	/// Custom icon resolvers that are evaluated before the built-in auto-icon inference.
