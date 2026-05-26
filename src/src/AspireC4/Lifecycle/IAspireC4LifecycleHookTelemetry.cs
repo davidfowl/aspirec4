@@ -40,4 +40,10 @@ interface IAspireC4LifecycleHookTelemetry
 
 	[Warning]
 	void FailedToResolveLatestContainerVersion();
+
+	[Debug]
+	void ApplyingDiagramOptionsSnapshot();
+
+	[Debug]
+	void DiagramOptionsSnapshotApplied(string outputDirectory, bool formatGeneratedFile, bool disableHmr);
 }
