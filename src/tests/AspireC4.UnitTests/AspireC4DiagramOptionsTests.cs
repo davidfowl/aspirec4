@@ -180,5 +180,103 @@ public sealed class AspireC4DiagramOptionsTests
 		await Assert.That(target.StateTagMap.ContainsKey("Stopped")).IsFalse();
 	}
 
+	[Test]
+	public async Task ApplyDelta_UnchangedScalarProperty_DoesNotOverrideTarget()
+	{
+		// Arrange — simulate config setting ViewTitle before IOptions.Value is resolved
+		var baseline = CreateSut();
+		var callbackResult = CreateSut(); // callback did not touch ViewTitle
+		var target = CreateSut();
+		target.ViewTitle = "Config Title"; // target already has a config-bound value
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert — config-bound value must be preserved since callback didn't change it
+		await Assert.That(target.ViewTitle).IsEqualTo("Config Title");
+	}
+
+	[Test]
+	public async Task ApplyDelta_ChangedScalarProperty_OverridesTarget()
+	{
+		// Arrange
+		var baseline = CreateSut();
+		var callbackResult = CreateSut();
+		callbackResult.ViewTitle = "Callback Title"; // callback explicitly set this
+		var target = CreateSut();
+		target.ViewTitle = "Config Title";
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert — callback value wins
+		await Assert.That(target.ViewTitle).IsEqualTo("Callback Title");
+	}
+
+	[Test]
+	public async Task ApplyDelta_NullableChangedToNull_OverridesTarget()
+	{
+		// Arrange — DefaultViewId defaults to "index"; callback sets it to null
+		var baseline = CreateSut();
+		var callbackResult = CreateSut();
+		callbackResult.DefaultViewId = null; // differs from baseline default "index"
+		var target = CreateSut();
+		target.DefaultViewId = "some-config-value";
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert — explicit null from callback wins
+		await Assert.That(target.DefaultViewId).IsNull();
+	}
+
+	[Test]
+	public async Task ApplyDelta_CollectionAddedByCallback_IsAppliedToTarget()
+	{
+		// Arrange
+		var baseline = CreateSut();
+		var callbackResult = CreateSut();
+		callbackResult.AdditionalDSLFiles.Add("extra.c4"); // callback added an entry
+		var target = CreateSut();
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert
+		await Assert.That(target.AdditionalDSLFiles).Contains("extra.c4");
+	}
+
+	[Test]
+	public async Task ApplyDelta_EmptyCollection_DoesNotOverrideTargetCollection()
+	{
+		// Arrange — callback did not add anything; target already has a config-driven entry
+		var baseline = CreateSut();
+		var callbackResult = CreateSut(); // callback left AdditionalDSLFiles empty
+		var target = CreateSut();
+		target.AdditionalDSLFiles.Add("config-added.c4");
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert — target's collection is preserved
+		await Assert.That(target.AdditionalDSLFiles).Contains("config-added.c4");
+	}
+
+	[Test]
+	public async Task ApplyDelta_ExcludedResourceTypesChangedByCallback_IsAppliedToTarget()
+	{
+		// Arrange — callback removes the default ParameterResource exclusion
+		var baseline = CreateSut();
+		var callbackResult = CreateSut();
+		callbackResult.ExcludedResourceTypes.Clear(); // differs from baseline {ParameterResource}
+		var target = CreateSut();
+
+		// Act
+		callbackResult.ApplyDelta(baseline, target);
+
+		// Assert — callback's cleared set wins
+		await Assert.That(target.ExcludedResourceTypes).IsEmpty();
+	}
+
 	static AspireC4DiagramOptions CreateSut() => new();
 }

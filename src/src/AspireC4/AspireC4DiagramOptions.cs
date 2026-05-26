@@ -422,8 +422,103 @@ public sealed class AspireC4DiagramOptions
 		target.IconResolvers.AddRange(IconResolvers);
 
 		// Dictionary properties — new instances so callers can't mutate shared state.
-		target.ImageAliases = new Dictionary<string, string>(ImageAliases, StringComparer.OrdinalIgnoreCase);
-		target.StateTagMap = new Dictionary<string, string?>(StateTagMap);
-		target.ConfigFileMetadata = new Dictionary<string, string>(ConfigFileMetadata);
+		// Preserve each source dictionary's comparer so key-lookup semantics are unchanged
+		// after the copy (e.g. ImageAliases uses OrdinalIgnoreCase by default).
+		target.ImageAliases = new Dictionary<string, string>(ImageAliases, ImageAliases.Comparer);
+		target.StateTagMap = new Dictionary<string, string?>(StateTagMap, StateTagMap.Comparer);
+		target.ConfigFileMetadata = new Dictionary<string, string>(ConfigFileMetadata, ConfigFileMetadata.Comparer);
+	}
+
+	/// <summary>
+	/// Applies only the properties that differ from <paramref name="baseline"/> to <paramref name="target"/>.
+	/// </summary>
+	/// <remarks>
+	/// Used by <c>AddAspireC4</c> to apply callback-authored overrides on top of a lazily-bound
+	/// configuration pipeline. Because the callback is invoked eagerly against fresh defaults
+	/// (both <c>this</c> and <paramref name="baseline"/> start from <c>new()</c>), any property
+	/// that equals the baseline was not explicitly set by the callback and should not override a
+	/// config-bound value. Only changed properties win, preserving correct config &lt; code precedence.
+	/// </remarks>
+	internal void ApplyDelta(AspireC4DiagramOptions baseline, AspireC4DiagramOptions target)
+	{
+		// Scalar properties — only apply if the callback changed them from the baseline default.
+		if (GeneratedViewId != baseline.GeneratedViewId)
+			target.GeneratedViewId = GeneratedViewId;
+		if (DefaultViewId != baseline.DefaultViewId)
+			target.DefaultViewId = DefaultViewId;
+		if (Title != baseline.Title)
+			target.Title = Title;
+		if (ViewTitle != baseline.ViewTitle)
+			target.ViewTitle = ViewTitle;
+		if (ViewDescription != baseline.ViewDescription)
+			target.ViewDescription = ViewDescription;
+		if (OutputDirectory != baseline.OutputDirectory)
+			target.OutputDirectory = OutputDirectory;
+		if (FileName != baseline.FileName)
+			target.FileName = FileName;
+		if (DisableHMR != baseline.DisableHMR)
+			target.DisableHMR = DisableHMR;
+		if (HMRPort != baseline.HMRPort)
+			target.HMRPort = HMRPort;
+		if (ContainerImageTag != baseline.ContainerImageTag)
+			target.ContainerImageTag = ContainerImageTag;
+		if (CheckLatestImageVersion != baseline.CheckLatestImageVersion)
+			target.CheckLatestImageVersion = CheckLatestImageVersion;
+		if (AutoIconsEnabled != baseline.AutoIconsEnabled)
+			target.AutoIconsEnabled = AutoIconsEnabled;
+		if (HideFromDashboard != baseline.HideFromDashboard)
+			target.HideFromDashboard = HideFromDashboard;
+		if (DashboardLinkDisplayName != baseline.DashboardLinkDisplayName)
+			target.DashboardLinkDisplayName = DashboardLinkDisplayName;
+		if (RelationshipKindSyntax != baseline.RelationshipKindSyntax)
+			target.RelationshipKindSyntax = RelationshipKindSyntax;
+		if (FormatGeneratedFile != baseline.FormatGeneratedFile)
+			target.FormatGeneratedFile = FormatGeneratedFile;
+		if (ExternalProcessTimeoutSeconds != baseline.ExternalProcessTimeoutSeconds)
+			target.ExternalProcessTimeoutSeconds = ExternalProcessTimeoutSeconds;
+		if (UseDotIfAvailable != baseline.UseDotIfAvailable)
+			target.UseDotIfAvailable = UseDotIfAvailable;
+		if (AutoIncludeAspireMetadata != baseline.AutoIncludeAspireMetadata)
+			target.AutoIncludeAspireMetadata = AutoIncludeAspireMetadata;
+		if (NormaliseMetadataBehaviour != baseline.NormaliseMetadataBehaviour)
+			target.NormaliseMetadataBehaviour = NormaliseMetadataBehaviour;
+		if (GenerateConfigFile != baseline.GenerateConfigFile)
+			target.GenerateConfigFile = GenerateConfigFile;
+		if (IncludeAspireDashboardLinks != baseline.IncludeAspireDashboardLinks)
+			target.IncludeAspireDashboardLinks = IncludeAspireDashboardLinks;
+		if (IncludeAspireTokenInDashboardLinks != baseline.IncludeAspireTokenInDashboardLinks)
+			target.IncludeAspireTokenInDashboardLinks = IncludeAspireTokenInDashboardLinks;
+		if (IncludeDefaultStateStyles != baseline.IncludeDefaultStateStyles)
+			target.IncludeDefaultStateStyles = IncludeDefaultStateStyles;
+
+		// Collection properties — apply if the count changed (any add/remove by the callback).
+		if (ElementKindSpecs.Count != baseline.ElementKindSpecs.Count)
+			target.ElementKindSpecs = [.. ElementKindSpecs];
+		if (RelationshipKindSpecs.Count != baseline.RelationshipKindSpecs.Count)
+			target.RelationshipKindSpecs = [.. RelationshipKindSpecs];
+		if (AdditionalDSLFiles.Count != baseline.AdditionalDSLFiles.Count)
+			target.AdditionalDSLFiles = [.. AdditionalDSLFiles];
+		if (AdditionalDSLFolders.Count != baseline.AdditionalDSLFolders.Count)
+			target.AdditionalDSLFolders = [.. AdditionalDSLFolders];
+
+		// Use SetEquals for ExcludedResourceTypes: its default is non-empty ({ParameterResource}),
+		// so count comparison would yield false positives if the callback removes the default entry.
+		if (!ExcludedResourceTypes.SetEquals(baseline.ExcludedResourceTypes))
+			target.ExcludedResourceTypes = [.. ExcludedResourceTypes];
+
+		// IconResolvers has a getter-only List<T> — mutate in place.
+		if (IconResolvers.Count != baseline.IconResolvers.Count)
+		{
+			target.IconResolvers.Clear();
+			target.IconResolvers.AddRange(IconResolvers);
+		}
+
+		// Dictionary properties — apply if count changed; preserve source comparer.
+		if (ImageAliases.Count != baseline.ImageAliases.Count)
+			target.ImageAliases = new Dictionary<string, string>(ImageAliases, ImageAliases.Comparer);
+		if (StateTagMap.Count != baseline.StateTagMap.Count)
+			target.StateTagMap = new Dictionary<string, string?>(StateTagMap, StateTagMap.Comparer);
+		if (ConfigFileMetadata.Count != baseline.ConfigFileMetadata.Count)
+			target.ConfigFileMetadata = new Dictionary<string, string>(ConfigFileMetadata, ConfigFileMetadata.Comparer);
 	}
 }

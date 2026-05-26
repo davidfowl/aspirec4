@@ -1,6 +1,7 @@
 using Aspire.Hosting.AspireC4;
 using Aspire.Hosting.AspireC4.ApplicationModel;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -348,5 +349,46 @@ public sealed class AspireC4DistributedApplicationBuilderExtensionsTests
 
 		// Assert — null from callback must override the built-in default ("index")
 		await Assert.That(diagramOptions.Value.DefaultViewId).IsNull();
+	}
+
+	// Regression: configuration added to the builder AFTER AddAspireC4 is called must still be
+	// reflected in IOptions<AspireC4DiagramOptions>. This mirrors the integration-test pattern
+	// where DistributedApplicationTestingBuilder injects test config after the AppHost program runs.
+	[Test]
+	public async Task AddAspireC4_IOptions_LateAddedConfigIsReflected()
+	{
+		// Arrange
+		var appBuilder = CreateAppBuilder();
+
+		// Act — call AddAspireC4 first, then add config (simulating late injection)
+		appBuilder.AddAspireC4();
+		appBuilder.Configuration.AddInMemoryCollection(
+			new Dictionary<string, string?> { ["AspireC4:ViewTitle"] = "Late Config Title" }
+		);
+		using var provider = appBuilder.Services.BuildServiceProvider();
+		var diagramOptions = provider.GetRequiredService<IOptions<AspireC4DiagramOptions>>();
+
+		// Assert — late-added config must be visible in IOptions
+		await Assert.That(diagramOptions.Value.ViewTitle).IsEqualTo("Late Config Title");
+	}
+
+	// Regression: callback-set values must win over configuration values for the same property,
+	// even when config is injected before AddAspireC4 is called.
+	[Test]
+	public async Task AddAspireC4_IOptions_CallbackWinsOverConfig()
+	{
+		// Arrange — add config first
+		var appBuilder = CreateAppBuilder();
+		appBuilder.Configuration.AddInMemoryCollection(
+			new Dictionary<string, string?> { ["AspireC4:ViewTitle"] = "Config Title" }
+		);
+
+		// Act — callback sets the same property; callback should win
+		appBuilder.AddAspireC4(configure: opts => opts.ViewTitle = "Callback Title");
+		using var provider = appBuilder.Services.BuildServiceProvider();
+		var diagramOptions = provider.GetRequiredService<IOptions<AspireC4DiagramOptions>>();
+
+		// Assert
+		await Assert.That(diagramOptions.Value.ViewTitle).IsEqualTo("Callback Title");
 	}
 }

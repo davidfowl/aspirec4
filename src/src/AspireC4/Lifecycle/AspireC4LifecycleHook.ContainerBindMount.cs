@@ -18,7 +18,11 @@ sealed partial class AspireC4LifecycleHook
 
 		var opts = options.Value;
 
-		telemetry.DiagramOptionsSnapshotApplied(opts.OutputDirectory, opts.FormatGeneratedFile, opts.DisableHMR);
+		telemetry.DiagramOptionsSnapshotApplied(
+			Path.GetFileName(opts.OutputDirectory),
+			opts.FormatGeneratedFile,
+			opts.DisableHMR
+		);
 		var outputDir = Path.GetFullPath(opts.OutputDirectory);
 
 		// Collect all host-side directory paths that must be visible inside the container.

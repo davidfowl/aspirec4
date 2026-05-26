@@ -45,5 +45,5 @@ interface IAspireC4LifecycleHookTelemetry
 	void ApplyingDiagramOptionsSnapshot();
 
 	[Debug]
-	void DiagramOptionsSnapshotApplied(string outputDirectory, bool formatGeneratedFile, bool disableHmr);
+	void DiagramOptionsSnapshotApplied(string outputDirectoryName, bool formatGeneratedFile, bool disableHmr);
 }
