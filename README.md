@@ -257,49 +257,6 @@ With this flag set, `specification { tag … }`, `specification { relationship �
 
 ---
 
-## Troubleshooting
-
-### `aspire start` hangs for 60 seconds then times out (TypeScript AppHost)
-
-**Symptom:** `aspire start` or `aspire run` exits after exactly 60 s with:
-
-```
-Timed out waiting for AppHost server to start after 60 seconds
-```
-
-No stack trace, no error in the logs.
-
-**Cause:** If you pass an `async` configure callback to `AddAspireC4`, the Aspire TypeScript runtime wraps it as a synchronous ATS proxy that internally calls `.GetAwaiter().GetResult()`. When `DistributedApplication.RunAsync` runs, it starts synchronously on StreamJsonRpc's `NonConcurrentSynchronizationContext`. Any code in a `BeforeStartEvent` subscriber that triggers the lazy `IOptions.Configure` callback (e.g., accessing `IOptions<T>.Value`) will invoke the proxy — which blocks the context while waiting for TypeScript setter responses that are themselves queued on the same blocked context. Classic sync-over-async deadlock.
-
-```typescript
-// This pattern can trigger the deadlock:
-await builder.addAspireC4({
-  configure: async (opts) => {
-    await opts.title.set("My App");        // each setter is an incoming JSON-RPC call
-    await opts.formatGeneratedFile.set(false);
-  },
-});
-```
-
-**Diagnosis:** While `aspire-managed.exe` is hung, run:
-
-```sh
-dotnet-dump collect --process-id <PID>
-dotnet-dump analyze <dump-file>
-> clrthreads
-> clrstack   # on each thread — look for Task.InternalWait inside NonConcurrentSynchronizationContext.ProcessQueueAsync
-```
-
-A thread blocked in `Task.InternalWait` inside `NonConcurrentSynchronizationContext.ProcessQueueAsync` confirms the deadlock.
-
-**Fix (AspireC4.Hosting ≥ 0.8):** This is handled automatically. The configure callback is evaluated eagerly on the background thread that `AddAspireC4` runs on, so no synchronous block occurs in the lazy IOptions pipeline.
-
-If you are implementing your own `[AspireExport(RunSyncOnBackgroundThread = true)]` method that accepts a delegate callback and registers a lazy `IOptions.Configure` callback internally, **do not invoke the delegate from within the `IOptions.Configure` lambda**. Instead, evaluate the delegate eagerly (while your exported method is still on the background thread), capture the result, and apply it via a plain copy inside the lazy callback.
-
-A fix has been reported upstream at [microsoft/aspire#17487](https://github.com/microsoft/aspire/issues/17487).
-
----
-
 ## Limitations
 
 - **Static diagram tool**: LikeC4 renders a static (file-based) diagram. State updates require a HMR refresh.
