@@ -4,6 +4,7 @@ using Aspire.Hosting.AspireC4.Lifecycle;
 using Aspire.Hosting.AspireC4.LikeC4.Annotations;
 using Aspire.Hosting.AspireC4.LikeC4.Runtime;
 using Aspire.Hosting.Lifecycle;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -51,17 +52,35 @@ public static class AspireC4DistributedApplicationBuilderExtensions
 
 		ArgumentNullException.ThrowIfNull(builder);
 
+		// Eagerly evaluate `configure` here — on the background thread that AddAspireC4 runs on
+		// (guaranteed by RunSyncOnBackgroundThread = true). Doing so is safe because:
+		//   1. The NonConcurrentSynchronizationContext is not occupied at this point.
+		//   2. The ATS proxy for `configure` calls .GetAwaiter().GetResult() internally, but
+		//      the sync context is free so TypeScript's setter-call responses can be dispatched.
+		//
+		// We must NOT call configure?.Invoke(opts) inside the lazy IOptions.Configure callback
+		// below: that callback may execute on the NonConcurrentSynchronizationContext (during
+		// DistributedApplication.RunAsync), and .GetResult() would block it while waiting for
+		// TypeScript's incoming setter calls — which themselves need the same blocked context.
+		// Classic sync-over-async deadlock. See AspireC4DiagramOptions.CopyTo for more detail.
+		//
+		// Strategy: eagerly bind config values so the callback can see and override/clear them
+		// intentionally (config < code precedence), then capture the fully-materialised snapshot
+		// (defaults → config → user callback) and apply it via CopyTo in the lazy pipeline.
+		AspireC4DiagramOptions diagramOpts = new();
+		builder.Configuration.Bind(AspireC4DiagramOptions.SectionName, diagramOpts);
+		configure?.Invoke(diagramOpts);
+
 		builder
 			.Services.AddOptions<AspireC4DiagramOptions>()
 			.BindConfiguration(AspireC4DiagramOptions.SectionName)
 			.Configure(opts =>
 			{
-				configure?.Invoke(opts);
+				// Apply the eagerly-computed snapshot. See the comment above for why we do this
+				// instead of calling configure?.Invoke(opts) directly.
+				diagramOpts.CopyTo(opts);
 				opts.OutputDirectory = ResolveOutputDirectory(builder.AppHostDirectory, opts.OutputDirectory);
 			});
-
-		AspireC4DiagramOptions diagramOpts = new();
-		configure?.Invoke(diagramOpts);
 
 		var outputDir = ResolveOutputDirectory(builder.AppHostDirectory, diagramOpts.OutputDirectory);
 		Directory.CreateDirectory(outputDir);

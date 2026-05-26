@@ -52,5 +52,133 @@ public sealed class AspireC4DiagramOptionsTests
 		await Assert.That(options.CheckLatestImageVersion).IsTrue();
 	}
 
+	[Test]
+	public async Task CopyTo_ScalarProperty_CopiesValueToTarget()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.Title = "My Title";
+		source.FormatGeneratedFile = false;
+		var target = CreateSut();
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert
+		await Assert.That(target.Title).IsEqualTo("My Title");
+		await Assert.That(target.FormatGeneratedFile).IsFalse();
+	}
+
+	[Test]
+	public async Task CopyTo_NullableProperty_CopiesNullToTarget()
+	{
+		// Arrange — target has a non-null value (as if bound from config); source has null.
+		var source = CreateSut(); // Title defaults to null
+		var target = CreateSut();
+		target.Title = "Config Title";
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert — null from source overrides non-null in target (code wins over config)
+		await Assert.That(target.Title).IsNull();
+	}
+
+	[Test]
+	public async Task CopyTo_CollectionProperty_ReplacesTargetContents()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.AdditionalDSLFiles.Add("/path/to/file.c4");
+		var target = CreateSut();
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert
+		await Assert.That(target.AdditionalDSLFiles).Contains("/path/to/file.c4");
+		await Assert.That(target.AdditionalDSLFiles.Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task CopyTo_CollectionProperty_DoesNotShareReference()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.AdditionalDSLFiles.Add("/initial.c4");
+		var target = CreateSut();
+		source.CopyTo(target);
+
+		// Act — mutate source after copy
+		source.AdditionalDSLFiles.Add("/added-after.c4");
+
+		// Assert — target is unaffected
+		await Assert.That(target.AdditionalDSLFiles.Count).IsEqualTo(1);
+	}
+
+	[Test]
+	public async Task CopyTo_ExcludedResourceTypes_ReplacesTargetContents()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.ExcludedResourceTypes.Clear();
+		var target = CreateSut(); // default has typeof(ParameterResource)
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert — explicit clear from source overrides default in target
+		await Assert.That(target.ExcludedResourceTypes).IsEmpty();
+	}
+
+	[Test]
+	public async Task CopyTo_IconResolvers_ReplacesTargetContentsInPlace()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.IconResolvers.Add(_ => "tech:redis");
+		var target = CreateSut();
+		target.IconResolvers.Add(_ => "tech:postgres"); // existing entry to be cleared
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert
+		await Assert.That(target.IconResolvers.Count).IsEqualTo(1);
+		await Assert.That(target.IconResolvers[0](null!)).IsEqualTo("tech:redis");
+	}
+
+	[Test]
+	public async Task CopyTo_DictionaryProperty_ReplacesTargetContents()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.ImageAliases["@icons"] = "/path/to/icons";
+		var target = CreateSut();
+
+		// Act
+		source.CopyTo(target);
+
+		// Assert
+		await Assert.That(target.ImageAliases.ContainsKey("@icons")).IsTrue();
+		await Assert.That(target.ImageAliases["@icons"]).IsEqualTo("/path/to/icons");
+	}
+
+	[Test]
+	public async Task CopyTo_DictionaryProperty_DoesNotShareReference()
+	{
+		// Arrange
+		var source = CreateSut();
+		source.StateTagMap["Running"] = "aspire-run-state-running";
+		var target = CreateSut();
+		source.CopyTo(target);
+
+		// Act — mutate source after copy
+		source.StateTagMap["Stopped"] = "aspire-run-state-stopped";
+
+		// Assert — target is unaffected
+		await Assert.That(target.StateTagMap.ContainsKey("Stopped")).IsFalse();
+	}
+
 	static AspireC4DiagramOptions CreateSut() => new();
 }

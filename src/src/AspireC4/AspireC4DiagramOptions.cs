@@ -354,4 +354,76 @@ public sealed class AspireC4DiagramOptions
 	/// </summary>
 	[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2227:Collection properties should be read only")]
 	public Dictionary<string, string> ConfigFileMetadata { get; set; } = [];
+
+	/// <summary>
+	/// Copies all property values from this instance to <paramref name="target"/>.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// This method is called inside the lazy <c>IOptions.Configure</c> callback registered by
+	/// <c>AddAspireC4</c>, where we must NOT invoke the user's <c>configure</c> delegate directly.
+	/// </para>
+	/// <para>
+	/// <b>Why we can't call <c>configure?.Invoke(opts)</c> lazily:</b> in the polyglot (TypeScript)
+	/// AppHost scenario, <c>configure</c> is an ATS-generated proxy for an <c>async</c> TypeScript
+	/// callback (e.g. <c>async (opts) =&gt; { await opts.title.set("…"); }</c>). That proxy calls
+	/// <c>InvokeAsync(…).GetAwaiter().GetResult()</c> internally to bridge the async boundary.
+	/// When <c>IOptions.Value</c> is accessed during <c>DistributedApplication.RunAsync</c>, the
+	/// <c>Configure</c> callback executes on StreamJsonRpc's
+	/// <c>NonConcurrentSynchronizationContext</c> (a single-item dispatch queue). The
+	/// <c>.GetResult()</c> call blocks that context while waiting for TypeScript's incoming
+	/// setter calls — which themselves need to be dispatched on the same blocked context.
+	/// Classic sync-over-async deadlock.
+	/// </para>
+	/// <para>
+	/// The fix: <c>AddAspireC4</c> eagerly invokes <c>configure</c> on a background thread
+	/// (safe because <c>RunSyncOnBackgroundThread = true</c>), captures the fully-materialised
+	/// options snapshot (defaults → config binding → user callback), and then uses
+	/// <c>CopyTo</c> here to apply that snapshot in the lazy callback — no ATS proxy involved.
+	/// </para>
+	/// </remarks>
+	internal void CopyTo(AspireC4DiagramOptions target)
+	{
+		// Scalar / simple-value properties
+		target.GeneratedViewId = GeneratedViewId;
+		target.DefaultViewId = DefaultViewId;
+		target.Title = Title;
+		target.ViewTitle = ViewTitle;
+		target.ViewDescription = ViewDescription;
+		target.OutputDirectory = OutputDirectory;
+		target.FileName = FileName;
+		target.DisableHMR = DisableHMR;
+		target.HMRPort = HMRPort;
+		target.ContainerImageTag = ContainerImageTag;
+		target.CheckLatestImageVersion = CheckLatestImageVersion;
+		target.AutoIconsEnabled = AutoIconsEnabled;
+		target.HideFromDashboard = HideFromDashboard;
+		target.DashboardLinkDisplayName = DashboardLinkDisplayName;
+		target.RelationshipKindSyntax = RelationshipKindSyntax;
+		target.FormatGeneratedFile = FormatGeneratedFile;
+		target.ExternalProcessTimeoutSeconds = ExternalProcessTimeoutSeconds;
+		target.UseDotIfAvailable = UseDotIfAvailable;
+		target.AutoIncludeAspireMetadata = AutoIncludeAspireMetadata;
+		target.NormaliseMetadataBehaviour = NormaliseMetadataBehaviour;
+		target.GenerateConfigFile = GenerateConfigFile;
+		target.IncludeAspireDashboardLinks = IncludeAspireDashboardLinks;
+		target.IncludeAspireTokenInDashboardLinks = IncludeAspireTokenInDashboardLinks;
+		target.IncludeDefaultStateStyles = IncludeDefaultStateStyles;
+
+		// Collection properties — create new instances to avoid shared mutable references.
+		target.ElementKindSpecs = [.. ElementKindSpecs];
+		target.RelationshipKindSpecs = [.. RelationshipKindSpecs];
+		target.AdditionalDSLFiles = [.. AdditionalDSLFiles];
+		target.AdditionalDSLFolders = [.. AdditionalDSLFolders];
+		target.ExcludedResourceTypes = [.. ExcludedResourceTypes];
+
+		// IconResolvers has a getter-only List<T> — mutate in place, preserving order.
+		target.IconResolvers.Clear();
+		target.IconResolvers.AddRange(IconResolvers);
+
+		// Dictionary properties — new instances so callers can't mutate shared state.
+		target.ImageAliases = new Dictionary<string, string>(ImageAliases, StringComparer.OrdinalIgnoreCase);
+		target.StateTagMap = new Dictionary<string, string?>(StateTagMap);
+		target.ConfigFileMetadata = new Dictionary<string, string>(ConfigFileMetadata);
+	}
 }
